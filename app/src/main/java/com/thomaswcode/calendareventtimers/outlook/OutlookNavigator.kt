@@ -1,0 +1,384 @@
+package com.thomaswcode.calendareventtimers.outlook
+
+import android.accessibilityservice.AccessibilityService
+import android.content.Intent
+import android.os.SystemClock
+import com.thomaswcode.calendareventtimers.domain.EventParser
+import com.thomaswcode.calendareventtimers.domain.ScannedEvent
+import com.thomaswcode.calendareventtimers.domain.TriggerTime
+import com.thomaswcode.calendareventtimers.domain.cleanUiText
+import com.thomaswcode.calendareventtimers.outlook.CalendarReader.EventBlock
+import com.thomaswcode.calendareventtimers.outlook.CalendarReader.StripDay
+import com.thomaswcode.calendareventtimers.util.ScanLog
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.temporal.ChronoUnit
+import kotlin.math.abs
+import kotlin.math.min
+import kotlinx.coroutines.delay
+
+/** A scan step that cannot go on; the message is shown to the user. */
+class ScanFailure(message: String) : Exception(message)
+
+/**
+ * Drives Outlook (PLAN.md §4.3): launch → Calendar tab → Day view → target date → for each timed
+ * event starting that day: open it, read the details, close it. Navigation is always explicit,
+ * because Outlook remembers the last day and view shown.
+ *
+ * Results accumulate in [events] and [problems] as it goes, so a scan that fails part-way can still
+ * offer what it read.
+ */
+class OutlookNavigator(
+    private val service: AccessibilityService,
+    private val driver: UiDriver,
+    private val onProgress: (String) -> Unit,
+) {
+    val events = mutableListOf<ScannedEvent>()
+    val problems = mutableListOf<String>()
+
+    /** Today only: events whose start had passed, which were not opened. */
+    var startedSkipped = 0
+        private set
+
+    suspend fun scan(target: LocalDate, hasStarted: (LocalTime) -> Boolean) {
+        launchOutlook()
+        openCalendar()
+        ensureDayView()
+        goToDate(target)
+        waitForDay(target)
+        readDay(target, hasStarted)
+        ScanLog.i("Scan of ${EventParser.dayLabel(target)} done: ${events.size} read, $startedSkipped already started, ${problems.size} problem(s)")
+    }
+
+    private suspend fun launchOutlook() {
+        onProgress("Opening Outlook…")
+        val intent = service.packageManager.getLaunchIntentForPackage(OutlookSelectors.PACKAGE)
+            ?: throw ScanFailure("Outlook isn't installed.")
+        service.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        if (!driver.waitUntil(10_000) { driver.outlookInFront() }) fail("Outlook didn't open.")
+        delay(700)
+    }
+
+    private suspend fun openCalendar() {
+        onProgress("Opening the calendar…")
+        repeat(6) {
+            val root = driver.snapshot()
+            if (CalendarReader.isCalendar(root) && !DetailsReader.isDetails(root)) return
+            val tab = CalendarReader.calendarTab(root)
+            when {
+                tab != null -> {
+                    driver.click(tab, "Calendar tab")
+                    if (driver.waitUntil(4_000) { driver.hasId(OutlookSelectors.VIEW_SWITCHER) }) return
+                }
+                root.children.isEmpty() || !driver.outlookInFront() -> launchOutlook()
+                else -> {
+                    // Some other Outlook screen (an event, a message, search…): back out of it.
+                    val close = CalendarReader.closeButton(root)
+                    if (close != null) driver.click(close, "Close") else driver.back()
+                    delay(600)
+                }
+            }
+        }
+        fail("Couldn't find Outlook's Calendar tab. Outlook may have changed.")
+    }
+
+    /** The chosen view does not reliably persist, so check the switcher's description every run. */
+    private suspend fun ensureDayView() {
+        repeat(3) {
+            val root = driver.snapshot()
+            val switcher = CalendarReader.viewSwitcher(root)
+                ?: fail("Couldn't find the calendar's view switcher. Outlook may have changed.")
+            if (CalendarReader.isDayView(root)) return
+            onProgress("Switching to Day view…")
+            ScanLog.i("View switcher says '${switcher.desc}'")
+            driver.click(switcher, "view switcher")
+            val day = driver.waitFor(3_000) { r ->
+                r.find { it.viewId == OutlookSelectors.VIEW_MENU_ITEM_TITLE && cleanUiText(it.text).equals(OutlookSelectors.VIEW_MENU_DAY, ignoreCase = true) }
+            }
+            if (day != null) {
+                driver.click(day, "Day view")
+                if (driver.waitFor(3_000) { if (CalendarReader.isDayView(it)) true else null } != null) return
+            }
+        }
+        fail("Couldn't switch Outlook to Day view. Outlook may have changed.")
+    }
+
+    /** PLAN.md §2.3: find the day in the week strip (swiping weeks if needed) and select it. */
+    private suspend fun goToDate(target: LocalDate) {
+        val label = EventParser.dayLabel(target)
+        onProgress("Going to $label…")
+        repeat(5) {
+            val root = driver.snapshot()
+            val days = CalendarReader.stripDays(root)
+            if (days.isEmpty()) fail("Couldn't find the calendar's week strip. Outlook may have changed.")
+            val day = days.firstOrNull { it.label == label }
+            if (day != null) {
+                if (day.isSelected) return
+                driver.click(day.node, label)
+                if (driver.waitFor(3_000) { r -> CalendarReader.selectedDay(r)?.takeIf { it.label == label } } != null) return
+            } else {
+                val shown = days.mapNotNull { EventParser.resolveLabel(it.label, target) }
+                swipeStrip(root, days, forward = shown.isEmpty() || shown.max() < target)
+            }
+        }
+        if (flingFromToday(target, label)) return
+        fail("Couldn't open $label in Outlook's calendar.")
+    }
+
+    private suspend fun swipeStrip(root: UiNode, days: List<StripDay>, forward: Boolean) {
+        val b = CalendarReader.stripGrid(root)?.bounds
+            ?: days.first().node.bounds.let { Box(0, it.top, driver.screenWidth, it.bottom) }
+        val y = b.centerY.toFloat()
+        val right = b.left + b.width * 0.88f
+        val left = b.left + b.width * 0.14f
+        ScanLog.i("Swiping the week strip to the ${if (forward) "next" else "previous"} week")
+        if (forward) driver.swipe(right, y, left, y, 300) else driver.swipe(left, y, right, y, 300)
+        delay(800)
+    }
+
+    /** Fallback: select today, then fling the Day grid one day at a time (a slow swipe does nothing). */
+    private suspend fun flingFromToday(target: LocalDate, label: String): Boolean {
+        val steps = ChronoUnit.DAYS.between(LocalDate.now(), target)
+        if (steps !in -7..7) return false
+        ScanLog.w("Week strip didn't work; flinging from today instead")
+        val today = CalendarReader.stripDays(driver.snapshot()).firstOrNull { it.isToday } ?: return false
+        if (!today.isSelected) driver.click(today.node, "today")
+        delay(800)
+        repeat(abs(steps).toInt()) {
+            val grid = CalendarReader.dayGridScrollables(driver.snapshot()).firstOrNull()?.bounds ?: return false
+            val y = grid.top + grid.height * 0.4f
+            val right = grid.left + grid.width * 0.88f
+            val left = grid.left + grid.width * 0.09f
+            if (steps > 0) driver.swipe(right, y, left, y, 120) else driver.swipe(left, y, right, y, 120)
+            delay(900)
+        }
+        return driver.waitFor(2_000) { r -> CalendarReader.selectedDay(r)?.takeIf { it.label == label } } != null
+    }
+
+    /** Outlook may still be syncing after launch: wait until the day's blocks stop changing. */
+    private suspend fun waitForDay(target: LocalDate) {
+        val label = EventParser.dayLabel(target)
+        onProgress("Waiting for $label to load…")
+        val start = SystemClock.uptimeMillis()
+        var last: List<String> = emptyList()
+        var stableSince = start
+        while (true) {
+            val now = SystemClock.uptimeMillis()
+            val blocks = CalendarReader.eventBlocks(driver.snapshot()).map { it.desc }.sorted()
+            if (blocks != last) {
+                last = blocks
+                stableSince = now
+            }
+            val stable = now - stableSince
+            val elapsed = now - start
+            val hasDay = blocks.any { it.startsWith(label) }
+            if (elapsed >= 1_000 && ((hasDay && stable >= 800) || stable >= 2_500)) break
+            if (elapsed >= 8_000) break
+            delay(250)
+        }
+        ScanLog.i("$label shows ${last.size} event block(s)")
+    }
+
+    private suspend fun readDay(target: LocalDate, hasStarted: (LocalTime) -> Boolean) {
+        val label = EventParser.dayLabel(target)
+        val seen = HashSet<String>()
+        var renavigations = 0
+        var fruitlessScrolls = 0
+        scrollToTop()
+        var guard = 0
+        while (guard++ < 400) {
+            val root = driver.snapshot()
+            val onDay = CalendarReader.isCalendar(root) && !DetailsReader.isDetails(root) &&
+                CalendarReader.selectedDay(root)?.label == label
+            if (!onDay) {
+                if (++renavigations > 3) fail("Outlook kept leaving $label.")
+                ScanLog.w("No longer on $label; going back to it")
+                if (!CalendarReader.isCalendar(root) || DetailsReader.isDetails(root)) openCalendar()
+                ensureDayView()
+                goToDate(target)
+                waitForDay(target)
+                scrollToTop()
+                continue
+            }
+            val fresh = CalendarReader.eventBlocks(root)
+                .filter { EventParser.stableDesc(it.desc) !in seen }
+                .sortedWith(compareBy({ EventParser.startTimeIfStartsOn(it.desc, target) ?: LocalTime.MIN }, { it.node.bounds.top }))
+            if (fresh.isEmpty()) {
+                if (fruitlessScrolls >= 4 || !scrollGrid(down = true)) break
+                fruitlessScrolls++
+                continue
+            }
+            fruitlessScrolls = 0
+            for (block in fresh) {
+                seen += EventParser.stableDesc(block.desc)
+                // Skips all-day events, work-location chips and events that began on an earlier day.
+                val start = EventParser.startTimeIfStartsOn(block.desc, target) ?: continue
+                if (hasStarted(start)) {
+                    startedSkipped++
+                    continue
+                }
+                readEvent(block, target, start, label)
+                break // the screen changed; look again
+            }
+        }
+    }
+
+    private suspend fun readEvent(block: EventBlock, target: LocalDate, listedStart: LocalTime, label: String) {
+        val name = EventParser.titleFromDesc(block.desc) ?: block.desc.take(40)
+        onProgress("Reading event ${events.size + problems.size + 1}: $name")
+        driver.click(block.node, "event '$name'")
+        var opened = driver.waitUntil(5_000) { driver.hasId(OutlookSelectors.DETAILS_TITLE) }
+        if (!opened && driver.outlookInFront() && driver.hasId(OutlookSelectors.VIEW_SWITCHER) && !driver.hasId(OutlookSelectors.DETAILS_TITLE)) {
+            // Still on the calendar: the click didn't take, so tap the block's centre instead, but
+            // only where the block really is on screen (a tap elsewhere could hit Join or a link).
+            val again = CalendarReader.eventBlocks(driver.snapshot())
+                .firstOrNull { EventParser.stableDesc(it.desc) == EventParser.stableDesc(block.desc) }
+            if (again != null && again.node.visible && !again.node.bounds.isEmpty) {
+                driver.tap(again.node.bounds)
+                opened = driver.waitUntil(4_000) { driver.hasId(OutlookSelectors.DETAILS_TITLE) }
+            }
+        }
+        if (!opened) {
+            problems += "$name: the event didn't open"
+            ScanLog.dump("Event didn't open: $name", driver.snapshot().calendarOnlyDump())
+            returnToCalendar()
+            return
+        }
+
+        var (screen, read) = readSettledDetails(name, EventParser.locationCountInDesc(block.desc))
+        // The category row is at the bottom; scroll down if it isn't in the tree.
+        var scrolls = 0
+        while (!read.categoryRowFound && scrolls++ < 4) {
+            val scrollView = screen.byId(OutlookSelectors.DETAILS_SCROLLVIEW) ?: break
+            if (!driver.scrollVertically(scrollView, down = true)) break
+            delay(400)
+            screen = driver.snapshot()
+            read = read.merge(DetailsReader.read(screen))
+        }
+        if (!read.categoryRowFound) ScanLog.dump("No category row: $name", screen.calendarOnlyDump())
+        closeDetails()
+
+        // The screen that opened must be this block's event, not one left open or opened by a stray tap.
+        val title = read.title ?: EventParser.titleFromDesc(block.desc)
+        when {
+            title == null -> problems += "$name: couldn't read its title"
+            read.date != null && read.date != target -> problems += "$title: its details say ${read.dateText}, not $label"
+            read.start != null && read.start != listedStart ->
+                problems += "$name: the event that opened starts at ${read.start}, not $listedStart; skipped"
+            !EventParser.descMentions(block.desc, title) -> problems += "$name: the event that opened was '$title'; skipped"
+            else -> {
+                if (!read.categoryRowFound) problems += "$title: couldn't find its categories"
+                val start = read.start ?: listedStart
+                // Outlook adds location rows in varying order; the Day view's order is stable.
+                val location = EventParser.orderLike(EventParser.locationsInDesc(block.desc), read.locations)
+                    .joinToString("; ").ifEmpty { null }
+                events += ScannedEvent(title, target, start, location, read.categories)
+                ScanLog.i("Read '$title' at ${TriggerTime.formatHhMm(start)}, categories ${read.categories}, location $location")
+            }
+        }
+    }
+
+    /**
+     * Outlook fills the details screen in stages after its title appears: a second location row
+     * comes 1–1.3 s later. So read until nothing has changed for a while and there are as many
+     * location rows as the Day view's description listed ([expectedLocations]).
+     */
+    private suspend fun readSettledDetails(name: String, expectedLocations: Int): Pair<UiNode, DetailsRead> {
+        val opened = SystemClock.uptimeMillis()
+        var screen: UiNode = driver.snapshot()
+        var read = DetailsReader.read(screen)
+        var lastChange = opened
+        while (true) {
+            val now = SystemClock.uptimeMillis()
+            if (now - opened >= SETTLE_MAX_MS) {
+                ScanLog.w("'$name' details: ${read.locationRows} of $expectedLocations location(s) after ${SETTLE_MAX_MS} ms; using what is there")
+                break
+            }
+            val complete = read.locationRows >= expectedLocations
+            if (complete && now - opened >= SETTLE_MIN_MS && now - lastChange >= SETTLE_QUIET_MS) break
+            delay(150)
+            val again = driver.snapshot()
+            if (!DetailsReader.isDetails(again)) break
+            val reread = DetailsReader.read(again)
+            if (reread != read) {
+                val what = listOfNotNull(
+                    "title".takeIf { reread.title != read.title },
+                    "time".takeIf { reread.start != read.start || reread.date != read.date },
+                    "location".takeIf { reread.location != read.location },
+                    "categories".takeIf { reread.categories != read.categories || reread.categoryRowFound != read.categoryRowFound },
+                )
+                ScanLog.i("'$name' details changed (${what.joinToString()}) ${SystemClock.uptimeMillis() - opened} ms after opening")
+                screen = again
+                read = reread
+                lastChange = SystemClock.uptimeMillis()
+            }
+        }
+        return screen to read
+    }
+
+    private suspend fun closeDetails() {
+        val close = CalendarReader.closeButton(driver.snapshot())
+        if (close != null) driver.click(close, "Close") else driver.back()
+        val back = driver.waitUntil(4_000) {
+            driver.hasId(OutlookSelectors.VIEW_SWITCHER) && !driver.hasId(OutlookSelectors.DETAILS_TITLE)
+        }
+        if (!back) returnToCalendar()
+    }
+
+    private suspend fun returnToCalendar() {
+        repeat(3) {
+            val root = driver.snapshot()
+            if (CalendarReader.isCalendar(root) && !DetailsReader.isDetails(root)) return
+            if (root.children.isEmpty() || !driver.outlookInFront()) {
+                launchOutlook()
+            } else {
+                val close = CalendarReader.closeButton(root)
+                if (close != null) driver.click(close, "Close") else driver.back()
+                delay(800)
+            }
+        }
+        if (!CalendarReader.isCalendar(driver.snapshot())) fail("Couldn't get back to Outlook's calendar.")
+    }
+
+    private suspend fun scrollToTop() {
+        repeat(8) { if (!scrollGrid(down = false)) return }
+    }
+
+    /** Scrolls the hourly grid by about a screen; false once it can't go further. */
+    private suspend fun scrollGrid(down: Boolean): Boolean {
+        val root = driver.snapshot()
+        val scrollables = CalendarReader.dayGridScrollables(root)
+        for (node in scrollables) {
+            if (driver.scrollVertically(node, down)) {
+                delay(500)
+                return true
+            }
+        }
+        // No accessibility scroll on offer: drag in the hour-label gutter, where no event can be grabbed.
+        val grid = scrollables.firstOrNull()?.bounds ?: return false
+        val before = signature(root)
+        val x = (grid.left + min(70, grid.width / 12)).toFloat()
+        val upper = grid.top + grid.height * 0.25f
+        val lower = grid.top + grid.height * 0.85f
+        if (down) driver.swipe(x, lower, x, upper, 450) else driver.swipe(x, upper, x, lower, 450)
+        delay(600)
+        return signature(driver.snapshot()) != before
+    }
+
+    private fun signature(root: UiNode) = CalendarReader.eventBlocks(root).map { "${it.desc}@${it.node.bounds}" }.sorted()
+
+    private fun fail(message: String): Nothing {
+        runCatching { ScanLog.dump(message, driver.snapshot().calendarOnlyDump()) }
+        throw ScanFailure(message)
+    }
+
+    private companion object {
+        /**
+         * Details are read no sooner than this after opening, once unchanged for [SETTLE_QUIET_MS]
+         * and with all the locations the description promised (late rows measured at 0.9–1.3 s).
+         */
+        const val SETTLE_MIN_MS = 700L
+        const val SETTLE_QUIET_MS = 350L
+        const val SETTLE_MAX_MS = 4_000L
+    }
+}

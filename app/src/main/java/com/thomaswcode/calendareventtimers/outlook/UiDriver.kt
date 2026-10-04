@@ -1,0 +1,184 @@
+package com.thomaswcode.calendareventtimers.outlook
+
+import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
+import android.graphics.Rect
+import android.os.SystemClock
+import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
+import android.view.accessibility.AccessibilityWindowInfo
+import com.thomaswcode.calendareventtimers.util.ScanLog
+import kotlin.coroutines.resume
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
+
+/** An immutable copy of one accessibility node, holding the live node for actions. */
+class LiveNode(
+    val info: AccessibilityNodeInfo?,
+    override val className: String?,
+    override val viewId: String?,
+    override val text: String?,
+    override val desc: String?,
+    override val clickable: Boolean,
+    override val scrollable: Boolean,
+    override val selected: Boolean,
+    override val bounds: Box,
+    override val children: List<LiveNode>,
+    override val visible: Boolean = true,
+) : UiNode {
+    companion object {
+        private const val MAX_DEPTH = 60
+
+        fun capture(info: AccessibilityNodeInfo, depth: Int = 0): LiveNode {
+            val kids = if (depth >= MAX_DEPTH) emptyList() else
+                (0 until info.childCount).mapNotNull { i -> runCatching { info.getChild(i) }.getOrNull()?.let { capture(it, depth + 1) } }
+            val r = Rect().also { info.getBoundsInScreen(it) }
+            return LiveNode(
+                info = info,
+                className = info.className?.toString(),
+                viewId = info.viewIdResourceName,
+                text = info.text?.toString(),
+                desc = info.contentDescription?.toString(),
+                clickable = info.isClickable,
+                scrollable = info.isScrollable,
+                selected = info.isSelected,
+                bounds = Box(r.left, r.top, r.right, r.bottom),
+                children = kids,
+                visible = info.isVisibleToUser,
+            )
+        }
+
+        fun root(windows: List<LiveNode>) =
+            LiveNode(null, null, null, null, null, false, false, false, Box(0, 0, 0, 0), windows)
+    }
+}
+
+/**
+ * Thin, polling wrapper over the accessibility APIs, limited to Outlook's windows. Every wait has
+ * a timeout; the navigator dumps the tree when something isn't found.
+ */
+class UiDriver(private val service: AccessibilityService) {
+    private val pollMs = 200L
+
+    val screenWidth: Int get() = service.resources.displayMetrics.widthPixels
+
+    /** All on-screen Outlook windows (the app and popups such as the view menu), topmost first, under one root. */
+    fun snapshot(): LiveNode = LiveNode.root(outlookRoots().map { LiveNode.capture(it) })
+
+    private fun outlookRoots(): List<AccessibilityNodeInfo> {
+        // Application windows only: fetching a root is a call into the window's process, and for our
+        // own scan overlay that would mean our main thread answering every poll.
+        val fromWindows = runCatching { service.windows }.getOrNull().orEmpty()
+            .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            .sortedByDescending { it.layer }
+            .mapNotNull { w -> runCatching { w.root }.getOrNull()?.takeIf { it.packageName == OutlookSelectors.PACKAGE } }
+        if (fromWindows.isNotEmpty()) return fromWindows
+        return listOfNotNull(service.rootInActiveWindow?.takeIf { it.packageName == OutlookSelectors.PACKAGE })
+    }
+
+    fun outlookInFront(): Boolean = service.rootInActiveWindow?.packageName == OutlookSelectors.PACKAGE
+
+    /**
+     * Whether a view with [id] is on screen (not just in the tree, where Outlook keeps covered
+     * screens): one lookup per window and no tree copy, so cheap enough to poll.
+     */
+    fun hasId(id: String): Boolean = outlookRoots().any { root ->
+        runCatching { root.findAccessibilityNodeInfosByViewId(id) }.getOrNull().orEmpty().any { it.isVisibleToUser }
+    }
+
+    /** Polls [condition]; false on timeout. */
+    suspend fun waitUntil(timeoutMs: Long, condition: () -> Boolean): Boolean {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            if (condition()) return true
+            if (SystemClock.uptimeMillis() >= deadline) return false
+            delay(pollMs)
+        }
+    }
+
+    /** Polls until [probe] returns non-null; null on timeout. */
+    suspend fun <T : Any> waitFor(timeoutMs: Long, probe: (UiNode) -> T?): T? {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            probe(snapshot())?.let { return it }
+            if (SystemClock.uptimeMillis() >= deadline) return null
+            delay(pollMs)
+        }
+    }
+
+    /** ACTION_CLICK on the node or its nearest clickable ancestor, else a tap on its centre. */
+    suspend fun click(node: UiNode, what: String): Boolean {
+        var current = (node as? LiveNode)?.info
+        var hops = 0
+        while (current != null && hops < 5) {
+            if (current.isClickable && current.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                ScanLog.i("Clicked $what")
+                delay(250)
+                return true
+            }
+            current = current.parent
+            hops++
+        }
+        ScanLog.i("Tapping $what at ${node.bounds}")
+        return tap(node.bounds)
+    }
+
+    /** A real tap at the centre of [bounds]. */
+    suspend fun tap(bounds: Box): Boolean {
+        if (bounds.isEmpty) return false
+        val path = Path().apply { moveTo(bounds.centerX.toFloat(), bounds.centerY.toFloat()) }
+        val done = dispatch(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 60)).build())
+        delay(300)
+        return done
+    }
+
+    suspend fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long): Boolean {
+        val path = Path().apply {
+            moveTo(x1, y1)
+            lineTo(x2, y2)
+        }
+        return dispatch(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, durationMs)).build())
+    }
+
+    /**
+     * Scrolls [node] vertically by about a screen; false if it can't (e.g. at the end). Uses the
+     * directional actions when offered. The generic forward/backward actions are only used on a
+     * ScrollView, because on a horizontally paging list they would change the day instead.
+     */
+    fun scrollVertically(node: UiNode, down: Boolean): Boolean {
+        val info = (node as? LiveNode)?.info ?: return false
+        val offered = runCatching { info.actionList.map { it.id }.toSet() }.getOrDefault(emptySet())
+        val directional = if (down) AccessibilityAction.ACTION_SCROLL_DOWN.id else AccessibilityAction.ACTION_SCROLL_UP.id
+        if (directional in offered) return info.performAction(directional)
+        val generic = if (down) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+        if (node.shortClass == "ScrollView" && generic in offered) return info.performAction(generic)
+        return false
+    }
+
+    suspend fun back() {
+        service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+        delay(600)
+    }
+
+    private suspend fun dispatch(gesture: GestureDescription): Boolean = suspendCancellableCoroutine { cont ->
+        val accepted = service.dispatchGesture(
+            gesture,
+            object : AccessibilityService.GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    if (cont.isActive) cont.resume(true)
+                }
+
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    if (cont.isActive) cont.resume(false)
+                }
+            },
+            null,
+        )
+        if (!accepted && cont.isActive) cont.resume(false)
+    }
+}
