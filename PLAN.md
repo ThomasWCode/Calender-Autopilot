@@ -11,7 +11,9 @@ and sets an alarm for each one. Per event the user chooses:
 
 Home screen has two buttons: **Set alarms for today** and **Set alarms for tomorrow**.
 
-Status: **planning only — nothing built yet.** See [Decisions](#decisions).
+Status: **built** (debug APK) and tested on the Pixel 8a on 2026-10-04. See
+[Decisions](#decisions), [Implementation notes](#implementation-notes-2026-10-04) for what the
+phone showed while building, and [README.md](README.md) for build, setup and use.
 
 **Form factor (decided):** an Android app that reads Outlook's Day view through an
 AccessibilityService and **schedules its own exact alarms** (date + time) with
@@ -420,6 +422,47 @@ Install: `adb install -r app-debug.apk`.
 ## Open questions
 
 None at present.
+
+---
+
+## Implementation notes (2026-10-04)
+
+Found on the Pixel while building; some correct assumptions above.
+
+- **The service sees more than `uiautomator`.** Dumps skip nodes that aren't visible, but the
+  accessibility service gets the whole tree: every event of the day (no scrolling needed; the
+  scroll-and-collect code stays as a fallback) and the category row even when it is below the
+  fold. Outlook also keeps covered screens in the tree (the Day view stays behind an open event),
+  so the Close button and Calendar tab are only taken when on screen.
+- **`uiautomator dump` suspends accessibility services** while it runs. Never use it during a
+  scan; debug builds have `adb shell am broadcast -a com.thomaswcode.calendareventtimers.DEBUG_DUMP`,
+  which logs the service's own view.
+- **Locations (§2.5) are one row per location.** `URL; Room` is two `event_details_location_name`
+  rows. A second row can appear 0.9–1.3 s after the title, and rows come in either order on
+  different scans. The reader takes all rows, waits until there are as many as the Day view's
+  description lists, and sorts them into the description's order.
+- **Descriptions gain a countdown** near the start time (`…, in 2 mins` → `…, in 1 min`), so events
+  are tracked by the description without it.
+- **Android 17 background-audio hardening** (apps targeting API 37) mutes background audio unless a
+  foreground service runs and either has while-in-use capability or the app holds the exact-alarm
+  permission and plays `USAGE_ALARM`. The ring service meets the second; `dumpsys audio` shows the
+  player `started`, `USAGE_ALARM`, `mutedState:none`.
+- **Main-thread starvation**: polling roots of *every* window included the app's own scan overlay,
+  so each poll made the app's main thread answer, and the overlay's STOP button reacted 17 s late.
+  Only application windows are polled now.
+- **Coroutine pitfall**: after STOP cancels the scan, a `withContext()` that switches dispatcher
+  throws on its way back even if its block ran under `NonCancellable`, which silently lost the
+  partial result once. The outcome is now built and published inside `NonCancellable`, and a
+  `finally` always removes the overlay.
+- **Alarm state changes are conditional** SQL updates (RINGING only from SCHEDULED/SNOOZED,
+  DISMISSED/MISSED/SNOOZED only from RINGING, …), so the alarm receiver, ring service, resync and
+  UI can't overwrite each other. Snooze and Dismiss carry the ids of the alarms on screen, and
+  swiping the ringing notification away (Android 14+ allows it when unlocked) counts as Dismiss.
+- **An opened event must match the tapped block** (same start time, title in the block's
+  description), so a details screen left open or opened by a stray tap is never read as another event.
+- **Settings shortcut**: the per-service accessibility page needs a system permission, so the
+  checklist opens the Accessibility list.
+- **Speed**: about 2–2.5 s per event; a 28-event day takes 70–80 s, a quiet afternoon 25 s.
 
 ---
 
