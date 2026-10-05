@@ -48,7 +48,7 @@ object SetupChecks {
                 when {
                     readerConnected -> "On. It only works inside Outlook, and only when you tap a button here."
                     readerOn -> "Switched on but not running. Turn it off and on again in Accessibility settings."
-                    else -> "Lets the app read Outlook's calendar. In Accessibility settings, open Calendar Event Timers " +
+                    else -> "Lets the app read Outlook's calendar. In Accessibility settings, open Calendar Autopilot " +
                         "and turn it on. If Android says it's a restricted setting, open App info, tap ⋮ (top right), " +
                         "choose Allow restricted settings, then try again."
                 },

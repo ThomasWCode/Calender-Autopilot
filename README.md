@@ -1,6 +1,6 @@
-# Calendar Event Timers (Android)
+# Calendar Autopilot (Android)
 
-Sets alarms for your Outlook events labelled **Moveable** or **Immoveable**. Tap **Set alarms for
+Formerly *Calendar Event Timers*. Sets alarms for your Outlook events labelled **Moveable** or **Immoveable**. Tap **Set alarms for
 today** or **Set alarms for tomorrow**; the app reads that day in the Outlook app, lists the
 labelled events, and after you confirm, sets one alarm per event: at the start time, or 5 minutes
 before if you tick that. The alarms are the app's own exact alarms (with a date, unlike the Clock
@@ -33,8 +33,8 @@ Open the app; a **Finish setting up** card lists anything missing, and **⋮ →
 has a button for each item.
 
 1. **Notifications**: allow when asked (a ringing alarm is a notification).
-2. **Outlook reader**: Settings → Accessibility → Calendar Event Timers → On. If Android calls it a
-   restricted setting: Settings → Apps → Calendar Event Timers → ⋮ → *Allow restricted settings*,
+2. **Outlook reader**: Settings → Accessibility → Calendar Autopilot → On. If Android calls it a
+   restricted setting: Settings → Apps → Calendar Autopilot → ⋮ → *Allow restricted settings*,
    then try again. The service only works inside Outlook, and only when you tap a scan button.
 3. **Full-screen alarms** and **exact alarms** are normally granted at install; the checklist
    says if not.

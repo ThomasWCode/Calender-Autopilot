@@ -139,7 +139,7 @@ fun LogScreen(onBack: () -> Unit) {
                 actions = {
                     TextButton(onClick = {
                         context.getSystemService(ClipboardManager::class.java)
-                            .setPrimaryClip(ClipData.newPlainText("Calendar Event Timers log", lines.joinToString("\n")))
+                            .setPrimaryClip(ClipData.newPlainText("Calendar Autopilot log", lines.joinToString("\n")))
                     }) { Text("Copy") }
                     TextButton(onClick = { ScanLog.clear() }) { Text("Clear") }
                 },

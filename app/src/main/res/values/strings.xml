@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Calendar Event Timers</string>
-    <string name="accessibility_service_label">Calendar Event Timers – Outlook reader</string>
-    <string name="accessibility_service_description">Reads today\'s or tomorrow\'s events from the Outlook app\'s calendar (Day view) when you tap a button in Calendar Event Timers, so that it can set alarms for events labelled Moveable or Immoveable. It only works inside Outlook, never opens emails, and nothing leaves the phone.</string>
+    <string name="app_name">Calendar Autopilot</string>
+    <string name="accessibility_service_label">Calendar Autopilot – Outlook reader</string>
+    <string name="accessibility_service_description">Reads today\'s or tomorrow\'s events from the Outlook app\'s calendar (Day view) when you tap a button in Calendar Autopilot, so that it can set alarms for events labelled Moveable or Immoveable. It only works inside Outlook, never opens emails, and nothing leaves the phone.</string>
 </resources>

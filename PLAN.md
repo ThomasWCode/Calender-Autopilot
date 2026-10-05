@@ -1,5 +1,9 @@
 # Calendar Event Timers — Plan & Findings
 
+> The app is now called **Calendar Autopilot** (display name only; the package id is unchanged).
+> Room booking, the new home screen and the speed-ups that reuse earlier runs are planned in
+> [PLAN-ROOM-BOOKING.md](PLAN-ROOM-BOOKING.md). This file stays the record of the alarm feature.
+
 On-phone Android app that reads **today's or tomorrow's** Outlook calendar events
 labelled **Moveable** or **Immoveable**, extracts *title, location, label, start time*,
 and sets an alarm for each one. Per event the user chooses:
@@ -337,7 +341,7 @@ Home screen:
 
 ```
 ┌──────────────────────────────────────────────┐
-│ Calendar Event Timers                        │
+│ Calendar Autopilot                           │
 │  [ Set alarms for today ]                    │
 │  [ Set alarms for tomorrow ]                 │
 │                                              │
@@ -351,7 +355,7 @@ Home screen:
 
 | Item | How it's granted |
 |---|---|
-| Accessibility service | Settings → Apps → *Calendar Event Timers* → ⋮ → **Allow restricted settings** (Android 13+ blocks this for sideloaded apps), then Settings → Accessibility → enable |
+| Accessibility service | Settings → Apps → *Calendar Autopilot* → ⋮ → **Allow restricted settings** (Android 13+ blocks this for sideloaded apps), then Settings → Accessibility → enable |
 | `USE_EXACT_ALARM` | Granted at install (Android 13+). Required by `setAlarmClock` |
 | `POST_NOTIFICATIONS` | Runtime prompt on first launch (ringing notification) |
 | `USE_FULL_SCREEN_INTENT` | Android 14+: check `NotificationManager.canUseFullScreenIntent()`; if false, open `ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT` |
