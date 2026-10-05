@@ -121,9 +121,11 @@ object ManageController {
         return out
     }
 
+    /** The next free room in the user's order, other than the booking's own (it may have declined). */
     fun changeRoom(context: Context, booking: BookingEntity): String? =
         run(context, booking, "Changing the room") { nav, settings ->
-            nav.changeRoom(date(booking), start(booking), booking.bookingTitle, settings)
+            val others = settings.rooms.filterNot { r -> booking.room?.let { RoomChoice.matches(it, r) || it.equals(r, ignoreCase = true) } == true }
+            nav.changeRoom(date(booking), start(booking), booking.bookingTitle, booking.room, settings.copy(rooms = others))
         }
 
     fun editPeople(context: Context, booking: BookingEntity, keep: List<String>): String? {
@@ -132,13 +134,13 @@ object ManageController {
         val remove = current.filter { it !in keep }
         if (add.isEmpty() && remove.isEmpty()) return "Nothing to change."
         return run(context, booking, "Updating the people", peopleAfter = keep) { nav, _ ->
-            nav.editPeople(date(booking), start(booking), booking.bookingTitle, add, remove)
+            nav.editPeople(date(booking), start(booking), booking.bookingTitle, booking.room, add, remove)
         }
     }
 
     fun delete(context: Context, booking: BookingEntity): String? =
         run(context, booking, "Deleting the booking") { nav, _ ->
-            nav.deleteBooking(date(booking), start(booking), booking.bookingTitle)
+            nav.deleteBooking(date(booking), start(booking), booking.bookingTitle, booking.room)
         }
 
     /** A booking that isn't in the calendar any more: forget it (nothing to do in Outlook). */

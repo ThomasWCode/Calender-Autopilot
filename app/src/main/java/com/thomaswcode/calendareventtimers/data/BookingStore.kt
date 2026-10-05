@@ -6,6 +6,7 @@ import com.thomaswcode.calendareventtimers.booking.Answers
 import com.thomaswcode.calendareventtimers.booking.BookingCandidate
 import com.thomaswcode.calendareventtimers.booking.BookingRules
 import com.thomaswcode.calendareventtimers.booking.KnownBooking
+import com.thomaswcode.calendareventtimers.booking.RoomChoice
 import com.thomaswcode.calendareventtimers.booking.RoomCover
 import com.thomaswcode.calendareventtimers.booking.SeriesAnswers
 import com.thomaswcode.calendareventtimers.calendar.Attendee
@@ -18,6 +19,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -116,7 +118,7 @@ class BookingStore private constructor(private val context: Context) {
      * Reads every upcoming booking's room reply from the phone's calendar (§3.11). A booking that
      * can't be found a while after it was saved is NOT_FOUND (deleted in Outlook, or never saved).
      */
-    suspend fun refreshReplies(now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): Int = withContext(NonCancellable) {
+    suspend fun refreshReplies(now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): Int = withContext(NonCancellable + Dispatchers.IO) {
         val calendar = CalendarStore(context)
         if (!calendar.hasAccess()) return@withContext 0
         val main = calendar.mainCalendar() ?: return@withContext 0
@@ -128,9 +130,10 @@ class BookingStore private constructor(private val context: Context) {
         val attendees = calendar.attendees(events.map { it.eventId })
         Prefs.ensureLoaded(context)
         val rooms = Prefs.rooms.value
+        val paired = pair(bookings, events) { e -> RoomCover.roomReply(attendees[e.eventId].orEmpty(), rooms)?.first }
         var changed = 0
         for (b in bookings) {
-            val match = events.firstOrNull { matches(it, b) }
+            val match = paired[b.id]
             val reply = when {
                 match == null -> if (Duration.between(Instant.ofEpochMilli(b.createdAt), now) > NOT_FOUND_AFTER) RoomReply.NOT_FOUND else RoomReply.WAITING
                 else -> RoomCover.roomReply(attendees[match.eventId].orEmpty(), rooms)?.second ?: RoomReply.WAITING
@@ -164,6 +167,35 @@ class BookingStore private constructor(private val context: Context) {
         fun matches(event: CalEvent, booking: BookingEntity): Boolean =
             CalEvent.normaliseTitle(event.title) == CalEvent.normaliseTitle(booking.bookingTitle) &&
                 event.date.toString() == booking.eventDate && TriggerTime.formatHhMm(event.start) == booking.start
+
+        /**
+         * Each booking's event in the calendar, never one event for two bookings: by its own sync id
+         * once known; otherwise by title, date and start, preferring the event whose room ([roomOf]) is
+         * the booking's. (A re-booked event leaves the declined booking at the same time and title.)
+         */
+        fun pair(bookings: List<BookingEntity>, events: List<CalEvent>, roomOf: (CalEvent) -> String?): Map<Long, CalEvent> {
+            val used = HashSet<Long>()
+            val out = HashMap<Long, CalEvent>()
+            for (b in bookings) {
+                val id = b.bookingSyncId ?: continue
+                val e = events.firstOrNull { it.syncId == id && it.eventId !in used } ?: continue
+                out[b.id] = e
+                used += e.eventId
+            }
+            // Room matches first, for every booking; only then whatever is left, newest booking first.
+            for (byRoom in listOf(true, false)) {
+                for (b in bookings.filter { it.id !in out }.sortedByDescending { it.createdAt }) {
+                    val e = events.firstOrNull { it.eventId !in used && matches(it, b) && (!byRoom || sameRoom(roomOf(it), b.room)) } ?: continue
+                    out[b.id] = e
+                    used += e.eventId
+                }
+            }
+            return out
+        }
+
+        /** "KS-106" and Room Finder's "KS-106 (EPH staff only)" are the same room. */
+        private fun sameRoom(a: String?, b: String?): Boolean =
+            a != null && b != null && (a.equals(b, ignoreCase = true) || RoomChoice.matches(a, b) || RoomChoice.matches(b, a))
 
         // Holds the application context only (see get()), which lives as long as the process.
         @SuppressLint("StaticFieldLeak")

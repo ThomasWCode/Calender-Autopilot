@@ -353,17 +353,25 @@ class OutlookNavigator(
      * The [nth] block on [date] starting at [start] whose description mentions [title]. The
      * service normally sees the whole day; scrolling through the grid is the fallback.
      */
-    internal suspend fun findBlock(date: LocalDate, start: LocalTime, title: String, nth: Int = 0): EventBlock? {
+    internal suspend fun findBlock(date: LocalDate, start: LocalTime, title: String, nth: Int = 0): EventBlock? =
+        findBlocks(date, start, title).let { if (it.isEmpty()) null else it[min(nth, it.lastIndex)] }
+
+    /**
+     * Every block on [date] starting at [start] whose description mentions [title], left to right.
+     * "Mentions" is a substring test (titles can contain commas), so callers that act on an event
+     * must check the details that open (BookingNavigator does).
+     */
+    internal suspend fun findBlocks(date: LocalDate, start: LocalTime, title: String): List<EventBlock> {
         fun matching(root: UiNode) = CalendarReader.eventBlocks(root)
             .filter { EventParser.startTimeIfStartsOn(it.desc, date) == start && EventParser.descMentions(it.desc, title) }
             .sortedBy { it.node.bounds.left }
-        matching(driver.snapshot()).let { if (it.isNotEmpty()) return it[min(nth, it.lastIndex)] }
+        matching(driver.snapshot()).let { if (it.isNotEmpty()) return it }
         scrollToTop()
         repeat(12) {
-            matching(driver.snapshot()).let { if (it.isNotEmpty()) return it[min(nth, it.lastIndex)] }
-            if (!scrollGrid(down = true)) return null
+            matching(driver.snapshot()).let { if (it.isNotEmpty()) return it }
+            if (!scrollGrid(down = true)) return emptyList()
         }
-        return null
+        return emptyList()
     }
 
     /** Logs differences between the Day view's timed events and the provider's for [date]. */
