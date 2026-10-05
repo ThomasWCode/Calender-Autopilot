@@ -1,0 +1,66 @@
+Outlook 5.2638.1 time picker, as the app's accessibility service sees it (2026-10-05).
+
+`uiautomator dump` shows nothing under #protection_layout on this screen (with or without
+--windows); the service, which runs with flagIncludeNotImportantViews, sees the whole picker.
+These come from the debug build's DEBUG_DUMP broadcast, whose dump blanks texts outside the
+calendar to their lengths ('<10 chars>'), so the texts are filled in from the screenshots:
+time_picker_drag_mode.png, time_picker_wheels_start.png, time_picker_wheels_end.png.
+
+The picker opens in DRAG mode every time (it did not remember the wheel mode). One click on
+#action_picker_mode switches to the WHEEL mode ("Choose Time"). #action_done applies.
+
+---- Drag mode (default) ----
+ComposeView [0,0][1080,2400]
+  View [0,0][1080,2400]
+    z [offscreen] [0,121][1080,2337]
+      LinearLayout #root_calendar_views_container [0,121][1080,2337]
+        ViewGroup #toolbar [0,121][1080,268]
+          ImageButton d='<11 chars>' [click] [0,121][147,268]                             <- the X (closes without applying)
+          Button #calendar_month_title_button t='Mon 12 Oct' [click] [189,121][506,268]
+          LinearLayoutCompat [826,121][1080,268]
+            Button #action_picker_mode d='<18 chars>' [click] [826,131][953,257]     <- switch mode
+            Button #action_done d='Done' [click] [953,131][1080,257]
+        LinearLayout #calendar_view [0,268][1080,612]                                  <- week strip, as on the calendar
+          GridView [scroll] [0,394][1080,549]  (7 day Buttons, desc e.g. 'Monday 12 October, Selected')
+        RelativeLayout #day_view [0,613][1080,2337]                                    <- day grid with the draggable block
+          ScrollView [scroll] > RecyclerView [scroll] > event blocks (desc as in the Day view)
+
+---- Wheel mode ("Choose Time") ----
+LinearLayout #root_calendar_views_container [0,121][1080,2337]
+  ViewGroup #toolbar [0,121][1080,268]
+    ImageButton d='<11 chars>' [click] [0,121][147,268]
+    Button #calendar_month_title_button t='Choose Time' [click] [189,121][543,268]
+    LinearLayoutCompat [826,121][1080,268]
+      Button #action_picker_mode d='<18 chars>' [click] [826,131][953,257]
+      Button #action_done d='Done' [click] [953,131][1080,257]
+  LinearLayout #date_time_picker [0,269][1080,2337]                                    <- present only in wheel mode
+    ViewGroup #date_time_picker_container [0,269][1080,1281]
+      HorizontalScrollView #start_end_time_tab [42,269][1038,399]
+        LinearLayout d='Start time' [selected] [42,269][540,399]
+          TextView t='Start time' [selected]
+        LinearLayout d='End time' [click] [540,269][1038,399]
+          TextView t='End time'
+      NumberPicker [scroll] [offscreen] [0,0][0,0]                                     <- date wheel
+        Button t='Sun 11 Oct' [click] [99,399][530,777]                                <- previous value
+        EditText #numberpicker_input t='Mon 12 Oct' d='Mon 12 Oct' [click] [99,777][530,903]
+        Button t='Tue 13 Oct' [click] [99,903][530,1281]                               <- next value
+      NumberPicker [scroll] [offscreen] [0,0][0,0]                                     <- hour wheel, 0-23
+        Button t='7' [click] [630,399][756,777]
+        EditText #numberpicker_input t='8' d='8' [click] [630,777][756,903]
+        Button t='9' [click] [630,903][756,1281]
+      NumberPicker [scroll] [offscreen] [0,0][0,0]                                     <- minute wheel, 00-59, one-minute steps
+        Button t='04' [click] [855,399][981,777]
+        EditText #numberpicker_input t='05' d='05' [click] [855,777][981,903]
+        Button t='06' [click] [855,903][981,1281]
+
+Observed behaviour:
+- Tapping the centre value did not open a keyboard: the wheels are stepped, not typed
+  (ACTION_SET_TEXT on #numberpicker_input is still worth one try when implementing).
+- Tapping the "next" row moves a wheel by one (hour 8 -> 9).
+- Changing the start moves the end with it: start 08:05 -> 09:05 made the end 09:00 -> 10:00
+  (duration kept). So normally only the start needs setting; the end is checked afterwards.
+- Texts read as lengths were matched against the screenshots ('Choose Time' is 11 characters,
+  'Mon 12 Oct' 10). The X's description (11 characters) and #action_picker_mode's (18) were not
+  seen in clear: select them by position/id, not by those texts.
+- The NumberPickers report bounds [0,0][0,0] and [offscreen]; their child Buttons and EditText
+  have real bounds. NumberPicker offers ACTION_SCROLL_FORWARD / ACTION_SCROLL_BACKWARD.
