@@ -1,19 +1,26 @@
 package com.thomaswcode.calendareventtimers.scan
 
 import android.content.Context
-import android.content.Intent
+import com.thomaswcode.calendareventtimers.booking.BookingRules
+import com.thomaswcode.calendareventtimers.calendar.Attendee
+import com.thomaswcode.calendareventtimers.calendar.CalEvent
+import com.thomaswcode.calendareventtimers.calendar.CalendarStore
 import com.thomaswcode.calendareventtimers.data.AlarmStore
 import com.thomaswcode.calendareventtimers.domain.EventParser
 import com.thomaswcode.calendareventtimers.domain.ExistingAlarm
 import com.thomaswcode.calendareventtimers.domain.Review
 import com.thomaswcode.calendareventtimers.domain.ReviewItem
+import com.thomaswcode.calendareventtimers.domain.ScannedEvent
 import com.thomaswcode.calendareventtimers.domain.TriggerTime
+import com.thomaswcode.calendareventtimers.engine.LabelPass
+import com.thomaswcode.calendareventtimers.engine.LabelTarget
+import com.thomaswcode.calendareventtimers.outlook.AppScope
+import com.thomaswcode.calendareventtimers.outlook.LabelRead
+import com.thomaswcode.calendareventtimers.outlook.OutlookBusy
 import com.thomaswcode.calendareventtimers.outlook.OutlookNavigator
 import com.thomaswcode.calendareventtimers.outlook.OutlookReaderService
+import com.thomaswcode.calendareventtimers.outlook.OutlookSession
 import com.thomaswcode.calendareventtimers.outlook.ScanFailure
-import com.thomaswcode.calendareventtimers.outlook.ScanOverlay
-import com.thomaswcode.calendareventtimers.outlook.UiDriver
-import com.thomaswcode.calendareventtimers.ui.MainActivity
 import com.thomaswcode.calendareventtimers.util.ScanLog
 import java.time.Instant
 import java.time.LocalDate
@@ -36,15 +43,20 @@ data class ScanResult(
     val target: LocalDate,
     val isToday: Boolean,
     val items: List<ReviewItem>,
-    /** Events whose details were read. */
+    /** Events whose labels are known (read now or remembered). */
     val eventsRead: Int,
     /** Of those, the ones without a Moveable/Immoveable category. */
     val unlabelled: Int,
-    /** Today only: events that had already started, which were not opened. */
+    /** Today only: events that had already started, which were not looked at. */
     val startedSkipped: Int,
     val problems: List<String>,
     /** Set when the scan stopped early; the items are then what was read until then. */
     val incomplete: String?,
+    /** Labels reused from earlier runs, and labels read in Outlook this time. */
+    val labelsRemembered: Int = 0,
+    val labelsRead: Int = 0,
+    /** False when everything came from the phone's calendar and Outlook wasn't opened. */
+    val usedOutlook: Boolean = true,
 )
 
 /** One review row's ticks. */
@@ -70,8 +82,12 @@ data class ConfirmSummary(val set: Int, val alreadySet: Int, val skipped: Int, v
 }
 
 /**
- * Runs one scan at a time in the accessibility service's scope (so it outlives the activity),
- * and holds its state for the UI: Idle → Running → Done (review) or Failed.
+ * Runs one scan at a time (so it outlives the activity) and holds its state for the UI:
+ * Idle → Running → Done (review) or Failed.
+ *
+ * With calendar access the day's events come from the phone's calendar and Outlook is opened only
+ * for events whose labels aren't remembered (PLAN-ROOM-BOOKING.md §3.14); often not at all.
+ * Without it, the original scan opens every event of the day in Outlook.
  */
 object ScanController {
     sealed interface State {
@@ -92,43 +108,37 @@ object ScanController {
     /** Starts a scan of today or tomorrow; returns why it can't, or null. */
     fun start(context: Context, isToday: Boolean): String? {
         if (job?.isActive == true) return null
-        val service = OutlookReaderService.instance
-            ?: return "Turn on the Outlook reader (Settings → Accessibility) first."
+        if (OutlookSession.isBusy) return OutlookBusy().message
         val app = context.applicationContext
+        val useCalendar = CalendarStore.hasAccess(app)
+        if (!useCalendar && OutlookReaderService.instance == null) {
+            return "Turn on the Outlook reader (Settings → Accessibility) first."
+        }
         val zone = ZoneId.systemDefault()
         val today = LocalDate.now(zone)
         val target = if (isToday) today else today.plusDays(1)
-        _state.value = State.Running(target, isToday, "Opening Outlook…")
+        _state.value = State.Running(target, isToday, if (useCalendar) "Reading the phone's calendar…" else "Opening Outlook…")
         ScanLog.i("Scan started for ${if (isToday) "today" else "tomorrow"}, ${EventParser.dayLabel(target)}")
 
-        job = service.scope.launch {
-            val overlay = ScanOverlay(service) {
-                ScanLog.i("Stop pressed")
-                stop()
-            }
-            val navigator = OutlookNavigator(service, UiDriver(service)) { step ->
-                _state.update { if (it is State.Running) it.copy(step = step) else it }
-                overlay.post(step)
-            }
+        job = AppScope.scope.launch {
             try {
-                withContext(Dispatchers.Main) { overlay.show("Reading Outlook…") }
-                runScan(app, target, isToday, navigator, zone)
+                val calendar = if (useCalendar) withContext(Dispatchers.IO) { CalendarStore(app).mainCalendar() } else null
+                if (calendar != null) {
+                    runFromCalendar(app, target, isToday, zone, calendar)
+                } else {
+                    if (useCalendar) ScanLog.w("Falling back to reading the whole day in Outlook")
+                    val service = OutlookReaderService.instance
+                    if (service == null) {
+                        _state.value = State.Failed(target, isToday, "Outlook's calendar isn't in the phone's calendar store, and the Outlook reader is off.", null)
+                    } else {
+                        runFullScan(app, service, target, isToday, zone)
+                    }
+                }
             } finally {
-                // Whatever happened, never leave the overlay up or the home screen saying "Reading…".
+                // Whatever happened, never leave the home screen saying "Reading…".
                 withContext(NonCancellable) {
                     if (_state.value is State.Running) {
                         _state.value = State.Failed(target, isToday, "The scan ended unexpectedly.", null)
-                    }
-                    withContext(Dispatchers.Main) {
-                        overlay.hide()
-                        // Allowed from the background while the accessibility service is bound.
-                        runCatching {
-                            service.startActivity(
-                                Intent(service, MainActivity::class.java).addFlags(
-                                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP,
-                                ),
-                            )
-                        }.onFailure { ScanLog.e("Couldn't bring the app back", it) }
                     }
                 }
                 ScanLog.i("Scan finished: ${_state.value.javaClass.simpleName}")
@@ -137,37 +147,120 @@ object ScanController {
         return null
     }
 
-    /** Runs the navigator and publishes the outcome (review, or failure with whatever was read). */
-    private suspend fun runScan(context: Context, target: LocalDate, isToday: Boolean, navigator: OutlookNavigator, zone: ZoneId) {
-        val failure: String? = try {
-            withTimeout(SCAN_TIMEOUT_MS) {
-                navigator.scan(target) { start -> isToday && !TriggerTime.eventStart(target, start, zone).isAfter(Instant.now()) }
+    private fun step(text: String) {
+        _state.update { if (it is State.Running) it.copy(step = text) else it }
+    }
+
+    /** The engine: the phone's calendar for the events, remembered labels, Outlook only for the rest. */
+    private suspend fun runFromCalendar(
+        context: Context, target: LocalDate, isToday: Boolean, zone: ZoneId,
+        calendar: com.thomaswcode.calendareventtimers.calendar.ProviderCalendar,
+    ) {
+        val store = CalendarStore(context)
+        val now = Instant.now()
+        val all = withContext(Dispatchers.IO) { store.occurrencesOn(calendar, target, target, zone) }
+        val timed = all.filter { it.date == target && isAlarmCandidate(it) }
+        val (started, upcoming) = timed.partition { isToday && !it.begin.isAfter(now) }
+        val labels = LabelPass(context)
+        val plan = labels.plan(upcoming, now)
+        ScanLog.i("${EventParser.dayLabel(target)}: ${upcoming.size} event(s) to check, ${plan.remembered} label(s) remembered, ${plan.targets.size} to read in Outlook")
+
+        val reads = LinkedHashMap<LabelTarget, LabelRead>()
+        val failure: String? = if (plan.targets.isEmpty()) null else readInOutlook(plan.targets, all, reads)
+        withContext(NonCancellable) {
+            val read = reads.mapNotNull { (t, r) -> (r as? LabelRead.Read)?.let { t to it.categories } }.toMap()
+            labels.remember(read, Instant.now())
+            val known = plan.known + read.mapKeys { it.key.labelKey }
+            val events = upcoming.mapNotNull { e ->
+                known[e.labelKey]?.let { cats -> ScannedEvent(e.title.trim(), e.date, e.start, e.location, cats) }
             }
-            null
-        } catch (e: TimeoutCancellationException) {
-            ScanLog.w("Scan timed out")
-            "The scan took too long and was stopped."
-        } catch (e: CancellationException) {
-            ScanLog.i("Scan cancelled")
-            "Scan stopped."
-        } catch (e: ScanFailure) {
-            ScanLog.e("Scan failed: ${e.message}")
-            e.message ?: "The scan failed."
-        } catch (e: Exception) {
-            ScanLog.e("Scan crashed", e)
-            "Something went wrong: ${e.message}"
+            val problems = reads.values.mapNotNull { (it as? LabelRead.Problem)?.message }
+            val result = buildResult(
+                context, target, isToday, events, problems, started.size, zone, failure,
+                remembered = plan.known.size, readNow = read.size, usedOutlook = plan.targets.isNotEmpty(),
+            )
+            _state.value = if (failure == null) {
+                State.Done(result)
+            } else {
+                State.Failed(target, isToday, failure, result.takeIf { events.isNotEmpty() })
+            }
+        }
+    }
+
+    /** Reads [targets]' labels in Outlook into [into]; returns why it stopped early, or null. */
+    private suspend fun readInOutlook(targets: List<LabelTarget>, all: List<CalEvent>, into: MutableMap<LabelTarget, LabelRead>): String? {
+        val service = OutlookReaderService.instance
+            ?: return "${targets.size} event(s) need their labels read in Outlook: turn on the Outlook reader (Settings → Accessibility)."
+        step("Reading labels in Outlook…")
+        return outcome {
+            OutlookSession.run(service, "Reading labels in Outlook…", onStop = { stop() }) { session ->
+                val navigator = OutlookNavigator(service, session.driver) { s ->
+                    step(s)
+                    session.progress(s)
+                }
+                withTimeout(SCAN_TIMEOUT_MS) {
+                    navigator.readLabels(targets, all.groupBy { it.date }, into)
+                }
+            }
+        }
+    }
+
+    /** The original scan: every timed event of the day opened in Outlook. */
+    private suspend fun runFullScan(context: Context, service: OutlookReaderService, target: LocalDate, isToday: Boolean, zone: ZoneId) {
+        var navigator: OutlookNavigator? = null
+        val failure = outcome {
+            OutlookSession.run(service, "Reading Outlook…", onStop = { stop() }) { session ->
+                val nav = OutlookNavigator(service, session.driver) { s ->
+                    step(s)
+                    session.progress(s)
+                }
+                navigator = nav
+                withTimeout(SCAN_TIMEOUT_MS) {
+                    nav.scan(target) { start -> isToday && !TriggerTime.eventStart(target, start, zone).isAfter(Instant.now()) }
+                }
+            }
         }
         // After Stop the coroutine is cancelled, and a withContext() that switches dispatcher then
         // throws on its way back instead of returning (prompt cancellation). So the outcome is both
         // built and published inside NonCancellable, never handed back out of it.
         withContext(NonCancellable) {
+            val nav = navigator
+            val events = nav?.events?.toList().orEmpty()
+            val result = buildResult(
+                context, target, isToday, events, nav?.problems?.toList().orEmpty(), nav?.startedSkipped ?: 0, zone, failure,
+                remembered = 0, readNow = events.size, usedOutlook = true,
+            )
             _state.value = if (failure == null) {
-                State.Done(buildResult(context, target, isToday, navigator, zone, incomplete = null))
+                State.Done(result)
             } else {
-                failed(context, target, isToday, navigator, zone, failure)
+                State.Failed(target, isToday, failure, result.takeIf { events.isNotEmpty() })
             }
         }
     }
+
+    /** Runs [block] and turns how it ended into a message for the user (null: it finished). */
+    private suspend fun outcome(block: suspend () -> Unit): String? = try {
+        block()
+        null
+    } catch (e: TimeoutCancellationException) {
+        ScanLog.w("Scan timed out")
+        "The scan took too long and was stopped."
+    } catch (e: CancellationException) {
+        ScanLog.i("Scan cancelled")
+        "Scan stopped."
+    } catch (e: OutlookBusy) {
+        e.message
+    } catch (e: ScanFailure) {
+        ScanLog.e("Scan failed: ${e.message}")
+        e.message ?: "The scan failed."
+    } catch (e: Exception) {
+        ScanLog.e("Scan crashed", e)
+        "Something went wrong: ${e.message}"
+    }
+
+    /** Timed, not cancelled or declined, and not one of the app's own room bookings. */
+    private fun isAlarmCandidate(e: CalEvent): Boolean =
+        !e.allDay && !e.cancelled && e.selfStatus != Attendee.STATUS_DECLINED && !BookingRules.isRoomBooking(e.title)
 
     fun stop() {
         job?.cancel()
@@ -178,20 +271,13 @@ object ScanController {
         if (job?.isActive != true) _state.value = State.Idle
     }
 
-    private suspend fun failed(
-        context: Context, target: LocalDate, isToday: Boolean, navigator: OutlookNavigator, zone: ZoneId, message: String,
-    ): State {
-        val partial = if (navigator.events.isEmpty()) null else buildResult(context, target, isToday, navigator, zone, message)
-        return State.Failed(target, isToday, message, partial)
-    }
-
     private suspend fun buildResult(
-        context: Context, target: LocalDate, isToday: Boolean, navigator: OutlookNavigator, zone: ZoneId, incomplete: String?,
+        context: Context, target: LocalDate, isToday: Boolean, events: List<ScannedEvent>, problems: List<String>,
+        startedSkipped: Int, zone: ZoneId, incomplete: String?, remembered: Int, readNow: Int, usedOutlook: Boolean,
     ): ScanResult = withContext(NonCancellable + Dispatchers.IO) {
         ScanLog.i("Checking which events already have alarms")
         val existing = AlarmStore.get(context).existingFor(target)
         ScanLog.i("${existing.size} alarm(s) already set for $target")
-        val events = navigator.events.toList()
         val items = Review.build(events, Instant.now(), zone) { event ->
             existing.firstOrNull { it.eventStart == TriggerTime.formatHhMm(event.start) && it.title == event.title }
                 ?.let { ExistingAlarm(it.id, Instant.ofEpochMilli(it.triggerAt), it.offsetMin) }
@@ -202,9 +288,12 @@ object ScanController {
             items = items,
             eventsRead = events.size,
             unlabelled = events.count { EventParser.matchLabel(it.categories) == null },
-            startedSkipped = navigator.startedSkipped,
-            problems = navigator.problems.toList(),
+            startedSkipped = startedSkipped,
+            problems = problems,
             incomplete = incomplete,
+            labelsRemembered = remembered,
+            labelsRead = readNow,
+            usedOutlook = usedOutlook,
         )
     }
 

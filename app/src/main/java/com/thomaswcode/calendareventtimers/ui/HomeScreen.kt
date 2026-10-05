@@ -291,7 +291,7 @@ private fun RunningCard(scan: ScanController.State.Running, onStop: () -> Unit) 
             CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text("Reading Outlook for ${EventParser.dayLabel(scan.target)}…", style = MaterialTheme.typography.titleSmall)
+                Text("Checking ${EventParser.dayLabel(scan.target)}…", style = MaterialTheme.typography.titleSmall)
                 Text(scan.step, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             TextButton(onClick = onStop) { Text("Stop") }
@@ -303,7 +303,7 @@ private fun RunningCard(scan: ScanController.State.Running, onStop: () -> Unit) 
 private fun FailedCard(scan: ScanController.State.Failed, onRetry: () -> Unit, onDismiss: () -> Unit, onOpenLog: () -> Unit) {
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
         Column(Modifier.padding(16.dp)) {
-            Text("Couldn't read Outlook for ${EventParser.dayLabel(scan.target)}", style = MaterialTheme.typography.titleMedium)
+            Text("Couldn't check ${EventParser.dayLabel(scan.target)}", style = MaterialTheme.typography.titleMedium)
             Text(scan.message, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
             Text("No alarms were set.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {

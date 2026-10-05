@@ -65,6 +65,11 @@ fun SetupScreen(onBack: () -> Unit) {
         if (!granted) SetupChecks.open(context, SetupAction.NOTIFICATIONS)
         items = SetupChecks.items(context, connected)
     }
+    val calendarPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        // Likewise: after a refusal, App info → Permissions.
+        if (!granted) SetupChecks.open(context, SetupAction.APP_INFO)
+        items = SetupChecks.items(context, connected)
+    }
 
     Scaffold(
         topBar = {
@@ -106,10 +111,11 @@ fun SetupScreen(onBack: () -> Unit) {
                             ) {
                                 item.actions.forEach { (label, action) ->
                                     OutlinedButton(onClick = {
-                                        if (action == SetupAction.NOTIFICATIONS && !SetupChecks.notificationPermissionGranted(context)) {
-                                            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                        } else {
-                                            SetupChecks.open(context, action)
+                                        when {
+                                            action == SetupAction.NOTIFICATIONS && !SetupChecks.notificationPermissionGranted(context) ->
+                                                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                            action == SetupAction.CALENDAR -> calendarPermission.launch(Manifest.permission.READ_CALENDAR)
+                                            else -> SetupChecks.open(context, action)
                                         }
                                     }) { Text(label) }
                                 }

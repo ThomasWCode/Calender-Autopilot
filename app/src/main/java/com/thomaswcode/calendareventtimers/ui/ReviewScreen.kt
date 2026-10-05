@@ -144,6 +144,10 @@ private fun summary(result: ScanResult): String {
     val labelled = result.eventsRead - result.unlabelled
     val parts = mutableListOf("Checked ${result.eventsRead} event${if (result.eventsRead == 1) "" else "s"}", "$labelled labelled Moveable or Immoveable")
     if (result.startedSkipped > 0) parts += "${result.startedSkipped} already started"
+    when {
+        !result.usedOutlook -> parts += "all labels remembered, Outlook not opened"
+        result.labelsRemembered > 0 -> parts += "${result.labelsRemembered} labels remembered, ${result.labelsRead} read in Outlook"
+    }
     return parts.joinToString(" · ")
 }
 

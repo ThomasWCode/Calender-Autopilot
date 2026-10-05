@@ -12,6 +12,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Reads what Outlook syncs into the phone's calendar (events, invitees, descriptions, room
+         replies), so Outlook is opened less. Read only: changes go through Outlook's screens. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
 
     <queries>
         <package android:name="com.microsoft.office.outlook" />
