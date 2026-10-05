@@ -308,7 +308,8 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         if (clearFirst) clearLocations()
 
         if (settings.recentShortcut) {
-            val recent = waitForStatuses { LocationReader.recentRows(it) }
+            // Recent can be empty: don't wait long for it.
+            val recent = waitForStatuses(1_500) { LocationReader.recentRows(it) }
             val pick = RoomChoice.recentShortcut(settings.rooms, recent.map { it.room })
             if (pick != null) {
                 ScanLog.i("${pick.name} is free in Add Location's Recent list")
@@ -326,7 +327,7 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         val seen = LinkedHashMap<String, RoomStatus>()
         var end = false
         repeat(MAX_ROOM_PAGES) {
-            val rows = waitForStatuses { RoomFinderReader.rooms(it) }
+            val rows = waitForStatuses(4_000) { RoomFinderReader.rooms(it) }
             rows.forEach { seen[it.room.name] = it.room.status }
             when (val d = RoomChoice.decide(settings.rooms, seen.map { (n, s) -> RoomRow(n, s) }, end)) {
                 is RoomDecision.Chosen -> {
@@ -355,10 +356,10 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         fail("Room Finder's list didn't end")
     }
 
-    /** Reads rows until every one shows Free or Busy (or 4 s pass: unknown then counts as busy). */
-    private suspend fun waitForStatuses(read: (UiNode) -> List<RoomListRow>): List<RoomListRow> {
+    /** Reads rows until every one shows Free or Busy (or [timeoutMs] passes: unknown then counts as busy). */
+    private suspend fun waitForStatuses(timeoutMs: Long, read: (UiNode) -> List<RoomListRow>): List<RoomListRow> {
         var rows = read(driver.snapshot())
-        driver.waitUntil(4_000) {
+        driver.waitUntil(timeoutMs) {
             rows = read(driver.snapshot())
             rows.isNotEmpty() && rows.all { it.room.status != RoomStatus.UNKNOWN }
         }
