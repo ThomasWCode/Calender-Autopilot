@@ -1,0 +1,30 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<!-- RECONSTRUCTED, not a uiautomator dump (see time_picker_wheels.xml): the picker as it opens, a
+     drag editor on a day grid, from the service's dump and time_picker_drag_mode.png. Trimmed to
+     the toolbar and one week-strip day; the day grid's blocks are left out. -->
+<hierarchy rotation="0">
+  <node class="android.widget.FrameLayout" bounds="[0,0][1080,2400]">
+    <node class="android.widget.FrameLayout" resource-id="com.microsoft.office.outlook:id/protection_layout" bounds="[0,0][1080,2400]">
+      <node class="androidx.compose.ui.platform.ComposeView" bounds="[0,0][1080,2400]">
+        <node class="z" visible-to-user="false" bounds="[0,121][1080,2337]">
+          <node class="android.widget.LinearLayout" resource-id="com.microsoft.office.outlook:id/root_calendar_views_container" bounds="[0,121][1080,2337]">
+            <node class="android.view.ViewGroup" resource-id="com.microsoft.office.outlook:id/toolbar" bounds="[0,121][1080,268]">
+              <node class="android.widget.ImageButton" clickable="true" bounds="[0,121][147,268]" />
+              <node class="android.widget.Button" resource-id="com.microsoft.office.outlook:id/calendar_month_title_button" text="Mon 12 Oct" clickable="true" bounds="[189,121][506,268]" />
+              <node class="androidx.appcompat.widget.LinearLayoutCompat" bounds="[826,121][1080,268]">
+                <node class="android.widget.Button" resource-id="com.microsoft.office.outlook:id/action_picker_mode" clickable="true" bounds="[826,131][953,257]" />
+                <node class="android.widget.Button" resource-id="com.microsoft.office.outlook:id/action_done" content-desc="Done" clickable="true" bounds="[953,131][1080,257]" />
+              </node>
+            </node>
+            <node class="android.widget.LinearLayout" resource-id="com.microsoft.office.outlook:id/calendar_view" bounds="[0,268][1080,612]">
+              <node class="android.widget.GridView" scrollable="true" bounds="[0,394][1080,549]">
+                <node class="android.widget.Button" text="12" content-desc="Monday 12 October, Selected" clickable="true" bounds="[0,395][155,549]" />
+              </node>
+            </node>
+            <node class="android.widget.RelativeLayout" resource-id="com.microsoft.office.outlook:id/day_view" bounds="[0,613][1080,2337]" />
+          </node>
+        </node>
+      </node>
+    </node>
+  </node>
+</hierarchy>
