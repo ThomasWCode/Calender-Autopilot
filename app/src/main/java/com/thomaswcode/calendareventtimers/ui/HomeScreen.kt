@@ -152,7 +152,7 @@ fun HomeScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Calendar Event Timers") },
+                title = { Text("Calendar Autopilot") },
                 actions = {
                     var menu by remember { mutableStateOf(false) }
                     IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More") }
