@@ -60,6 +60,15 @@ object FormText {
     /** An hour or minute wheel's value: "8", "05". */
     fun parseNumber(text: String?): Int? = cleanUiText(text)?.takeIf { it.isNotEmpty() && it.all(Char::isDigit) }?.toInt()
 
+    /**
+     * The same text as Outlook shows it: invisible marks dropped, non-breaking and repeated spaces
+     * made single. Case is kept. (What Outlook reads back is cleaned; what was typed may not be.)
+     */
+    fun sameText(a: String?, b: String?): Boolean {
+        fun norm(s: String?) = cleanUiText(s)?.replace(Regex("""\s+"""), " ")
+        return norm(a) == norm(b)
+    }
+
     /** How the form and the date wheel show a day: "Mon 12 Oct". */
     fun formDate(date: LocalDate): String =
         "${date.dayOfWeek.getDisplayName(TextStyle.SHORT, UK).take(3)} ${date.dayOfMonth} ${date.month.getDisplayName(TextStyle.SHORT, UK).take(3)}"

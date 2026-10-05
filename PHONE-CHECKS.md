@@ -129,4 +129,7 @@ Save as fixtures (`app/src/test/resources/fixtures/booking/`) with uiautomator d
 | Removing a person from a chip | `removePerson` | D5 |
 | Room statuses are exactly Free/Busy | `RoomChoice.status` | B11 |
 | Outlook goes back to the Day view on the same day after Save | `ensureOnDay` before each booking | — (it's checked) |
-| The booking event shows in the provider under its title at the original's start | `BookingStore.matches`, reply check | D2 |
+| The booking event shows in the provider under its title at the original's start | `BookingStore.matches`, `BookingStore.pair`, reply check | D2 |
+| After saving an **edited** event Outlook shows its details (the app closes them) or the calendar | `BookingNavigator.save` | D3: if it lands elsewhere, the change is reported as "may have been saved" |
+| Closed sub-screens (Add Location, Room Finder, Add People, picker) leave the tree, or at least stop being visible | the `visibleId` checks in `BookingReaders.kt`, `onlyForm` | every step would time out with "…didn't close" |
+| Opening a booking for Change room / Edit people / Delete finds the right one: exact title, start, recorded room | `BookingNavigator.openForEdit` | D3–D5, also with two bookings at the same time (a re-booking after a decline) |

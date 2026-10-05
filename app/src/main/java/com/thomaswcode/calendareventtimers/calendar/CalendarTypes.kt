@@ -1,5 +1,6 @@
 package com.thomaswcode.calendareventtimers.calendar
 
+import com.thomaswcode.calendareventtimers.domain.cleanUiText
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -58,7 +59,8 @@ data class CalEvent(
         get() = endDate == date || (endDate == date.plusDays(1) && endTime == LocalTime.MIDNIGHT)
 
     companion object {
-        fun normaliseTitle(title: String): String = title.trim().replace(Regex("""\s+"""), " ").lowercase()
+        /** For comparing titles: invisible marks dropped and non-breaking spaces made plain (as Outlook's screens show them), runs of spaces as one, any case. */
+        fun normaliseTitle(title: String): String = cleanUiText(title).orEmpty().replace(Regex("""\s+"""), " ").lowercase()
     }
 }
 

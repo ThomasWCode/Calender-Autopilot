@@ -37,6 +37,7 @@ import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors.ROOM_LIST
 import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors.START_END_TABS
 import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors.TEXT_ALERT
 import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors.TEXT_ALERT_AT_TIME
+import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors.TEXT_ALERT_NONE
 import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors.TEXT_DATE
 import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors.TEXT_DELETE_EVENT
 import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors.TEXT_DESCRIPTION
@@ -54,6 +55,12 @@ import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors.TEXT_TIME_ZO
  */
 
 private fun UiNode.texts(): List<String> = findAll { it.isTextView }.mapNotNull { cleanUiText(it.text)?.ifEmpty { null } }
+
+/**
+ * A screen is open only when its marker is on screen: Outlook can keep covered or closing screens in
+ * the tree, and the "only the form" check after closing a sub-screen must not see them.
+ */
+private fun UiNode.visibleId(id: String): Boolean = find { it.viewId == id && it.visible } != null
 
 /** The top window holding a node that matches [predicate], so a sheet's texts aren't confused with the form's below. */
 private fun UiNode.windowWith(predicate: (UiNode) -> Boolean): UiNode? = children.firstOrNull { w -> w.find(predicate) != null }
@@ -142,9 +149,9 @@ class TimeWheel(val picker: UiNode, val input: UiNode?, val previous: UiNode?, v
 
 /** The Time row's picker: a drag editor that switches to Choose Time wheels (reference/room_booking/time_picker_service_dumps.txt). */
 object TimePickerReader {
-    fun isPicker(root: UiNode): Boolean = root.byId(PICKER_MODE) != null
+    fun isPicker(root: UiNode): Boolean = root.visibleId(PICKER_MODE)
 
-    fun isWheelMode(root: UiNode): Boolean = root.byId(DATE_TIME_PICKER) != null
+    fun isWheelMode(root: UiNode): Boolean = root.visibleId(DATE_TIME_PICKER)
 
     fun modeButton(root: UiNode): UiNode? = root.byId(PICKER_MODE)
 
@@ -186,7 +193,7 @@ private fun roomRows(container: UiNode?): List<RoomListRow> = container?.findAll
 
 /** Add Location: a place field, Room Finder, and recent rooms with their status for the form's time. */
 object LocationReader {
-    fun isOpen(root: UiNode): Boolean = root.byId(LOCATION_ROOT) != null
+    fun isOpen(root: UiNode): Boolean = root.visibleId(LOCATION_ROOT)
 
     fun roomFinderButton(root: UiNode): UiNode? = root.byId(ROOM_FINDER)
 
@@ -204,7 +211,7 @@ object LocationReader {
 
 /** Room Finder: buildings, then a building's rooms with Free/Busy. */
 object RoomFinderReader {
-    fun isBuildingList(root: UiNode): Boolean = root.byId(BUILDING_LIST) != null
+    fun isBuildingList(root: UiNode): Boolean = root.visibleId(BUILDING_LIST)
 
     fun searchField(root: UiNode): UiNode? = root.byId(BUILDING_SEARCH)
 
@@ -215,7 +222,7 @@ object RoomFinderReader {
 
     fun building(root: UiNode, name: String): UiNode? = buildings(root).firstOrNull { it.first.equals(name.trim(), ignoreCase = true) }?.second
 
-    fun isRoomList(root: UiNode): Boolean = root.byId(ROOM_LIST) != null
+    fun isRoomList(root: UiNode): Boolean = root.visibleId(ROOM_LIST)
 
     fun roomList(root: UiNode): UiNode? = root.byId(ROOM_LIST)
 
@@ -228,7 +235,7 @@ object RoomFinderReader {
 object PeopleReader {
     private val address = Regex("""<([^<>\s]+@[^<>\s]+)>""")
 
-    fun isOpen(root: UiNode): Boolean = root.byId(PEOPLE_ROOT) != null
+    fun isOpen(root: UiNode): Boolean = root.visibleId(PEOPLE_ROOT)
 
     fun input(root: UiNode): UiNode? = root.byId(PEOPLE_ROOT)?.find { it.viewId == PEOPLE_INPUT }
 
@@ -250,7 +257,7 @@ object PeopleReader {
 
 /** The Description dialog: a rich-text editor in a WebView. */
 object DescriptionReader {
-    fun isOpen(root: UiNode): Boolean = root.byId(DESCRIPTION_EDITOR) != null || root.byId(DESCRIPTION_FIELD) != null
+    fun isOpen(root: UiNode): Boolean = root.visibleId(DESCRIPTION_EDITOR) || root.visibleId(DESCRIPTION_FIELD)
 
     fun webView(root: UiNode): UiNode? = root.byId(DESCRIPTION_EDITOR)
 
@@ -265,7 +272,15 @@ object DescriptionReader {
 
 /** The Alert sheet: "None", "At time of event", "5 minutes before", … */
 object AlertSheetReader {
-    private fun sheet(root: UiNode): UiNode? = root.windowWith { it.isTextView && cleanUiText(it.text) == TEXT_ALERT_AT_TIME }
+    private val OPTIONS = setOf(TEXT_ALERT_NONE, TEXT_ALERT_AT_TIME, "5 minutes before", "10 minutes before", "15 minutes before", "30 minutes before")
+
+    /**
+     * The window listing the options. One option alone isn't enough: the form's own Alert row shows
+     * the current one ("At time of event" when that is the default).
+     */
+    private fun sheet(root: UiNode): UiNode? = root.children.firstOrNull { w ->
+        w.findAll { it.isTextView && cleanUiText(it.text) in OPTIONS }.mapNotNull { cleanUiText(it.text) }.distinct().size >= 3
+    }
 
     fun isOpen(root: UiNode): Boolean = sheet(root) != null
 

@@ -64,12 +64,17 @@ class OutlookSession private constructor(
                 }
                 return block(session)
             } finally {
-                withContext(NonCancellable + Dispatchers.Main) {
-                    overlay.hide()
-                    if (hideKeyboard) keyboard(service, AccessibilityService.SHOW_MODE_AUTO)
-                    bringAppBack(service, returnTo)
+                try {
+                    withContext(NonCancellable + Dispatchers.Main) {
+                        overlay.hide()
+                        if (hideKeyboard) keyboard(service, AccessibilityService.SHOW_MODE_AUTO)
+                        bringAppBack(service, returnTo)
+                    }
+                } finally {
+                    // After STOP the withContext above throws on its way back (it switched dispatcher in
+                    // a cancelled coroutine), so the flag is released here, or Outlook stays "busy".
+                    busy.set(false)
                 }
-                busy.set(false)
             }
         }
 

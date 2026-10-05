@@ -80,6 +80,7 @@ object BookingPlanner {
 
     fun plan(input: Input): Output {
         val attendeesOf = { e: CalEvent -> input.attendees[e.eventId].orEmpty() }
+        val mine = input.myAddresses.map { it.trim().lowercase() }.toSet()
         val toAsk = ArrayList<BookingCandidate>()
         val answeredBefore = ArrayList<BookingCandidate>()
         val covered = ArrayList<Pair<CalEvent, Cover>>()
@@ -98,7 +99,7 @@ object BookingPlanner {
             }
             val attendees = attendeesOf(e)
             val known = input.known[e.occurrenceKey]
-            val cover = RoomCover.cover(e, attendees, known, input.events, attendeesOf, input.rooms)
+            val cover = RoomCover.cover(e, attendees, known, input.events, attendeesOf, input.rooms, mine)
             if (cover != null) {
                 covered += e to cover
                 continue
@@ -119,7 +120,7 @@ object BookingPlanner {
                 defaults = defaults.copy(removed = defaults.removed.filter { r -> people.any { it.email == r } }.toSet()),
                 remembered = memory != null,
                 previous = previous,
-                partial = RoomCover.partial(e, input.events, attendeesOf, input.rooms, input.zone),
+                partial = RoomCover.partial(e, input.events, attendeesOf, input.rooms, input.zone, mine),
                 roomDeclined = declined,
             )
             if (previous == AnswerKind.NO_ROOM_WANTED) answeredBefore += candidate else toAsk += candidate

@@ -218,32 +218,33 @@ class RoomCoverTest {
     private val rooms = RoomList.DEFAULT
     private val meeting = calEvent(1, "TB Vx modelling 2-weekly call", day, "14:05", "15:00", location = "https://lshtm.zoom.us/j/1")
     private val none = { _: CalEvent -> emptyList<Attendee>() }
+    private val me = setOf("eiderwhi@lshtm.ac.uk")
 
     @Test
     fun appBookingStillHoldingTheRoom() {
         assertEquals(
             Cover.AppBooking("KS-121", RoomReply.WAITING),
-            RoomCover.cover(meeting, emptyList(), KnownBooking("KS-121", RoomReply.WAITING), emptyList(), none, rooms),
+            RoomCover.cover(meeting, emptyList(), KnownBooking("KS-121", RoomReply.WAITING), emptyList(), none, rooms, me),
         )
         // Declined or gone: offered again.
-        assertNull(RoomCover.cover(meeting, emptyList(), KnownBooking("KS-121", RoomReply.DECLINED), emptyList(), none, rooms))
-        assertNull(RoomCover.cover(meeting, emptyList(), KnownBooking("KS-121", RoomReply.NOT_FOUND), emptyList(), none, rooms))
+        assertNull(RoomCover.cover(meeting, emptyList(), KnownBooking("KS-121", RoomReply.DECLINED), emptyList(), none, rooms, me))
+        assertNull(RoomCover.cover(meeting, emptyList(), KnownBooking("KS-121", RoomReply.NOT_FOUND), emptyList(), none, rooms, me))
     }
 
     @Test
     fun appBookingFoundInTheCalendar() {
         val booking = calEvent(2, "Room Booking - TB Vx modelling 2-weekly call", day, "14:05", "15:00")
         val attendees = mapOf(2L to listOf(room("KS-117", Attendee.STATUS_TENTATIVE)))
-        val cover = RoomCover.cover(meeting, emptyList(), null, listOf(meeting, booking), { attendees[it.eventId].orEmpty() }, rooms)
+        val cover = RoomCover.cover(meeting, emptyList(), null, listOf(meeting, booking), { attendees[it.eventId].orEmpty() }, rooms, me)
         assertEquals(Cover.AppBooking("KS-117", RoomReply.TENTATIVE), cover)
     }
 
     @Test
     fun roomOnTheEventItself() {
-        assertEquals(Cover.RoomOnEvent("KS-207A"), RoomCover.cover(meeting, listOf(room("KS-207A", Attendee.STATUS_NONE)), null, emptyList(), none, rooms))
-        assertNull("a room that declined", RoomCover.cover(meeting, listOf(room("KS-207A", Attendee.STATUS_DECLINED)), null, emptyList(), none, rooms))
+        assertEquals(Cover.RoomOnEvent("KS-207A"), RoomCover.cover(meeting, listOf(room("KS-207A", Attendee.STATUS_NONE)), null, emptyList(), none, rooms, me))
+        assertNull("a room that declined", RoomCover.cover(meeting, listOf(room("KS-207A", Attendee.STATUS_DECLINED)), null, emptyList(), none, rooms, me))
         val inKs103d = meeting.copy(location = "KS-103D")
-        assertEquals(Cover.LocationNamesRoom("KS-103D"), RoomCover.cover(inKs103d, emptyList(), null, emptyList(), none, rooms))
+        assertEquals(Cover.LocationNamesRoom("KS-103D"), RoomCover.cover(inKs103d, emptyList(), null, emptyList(), none, rooms, me))
     }
 
     @Test
@@ -253,11 +254,20 @@ class RoomCoverTest {
         val attendees = mapOf(3L to listOf(room("KS-121")))
         assertEquals(
             Cover.OtherEvent("call", "KS-121"),
-            RoomCover.cover(meeting, emptyList(), null, listOf(meeting, call), { attendees[it.eventId].orEmpty() }, rooms),
+            RoomCover.cover(meeting, emptyList(), null, listOf(meeting, call), { attendees[it.eventId].orEmpty() }, rooms, me),
         )
         // Not yet accepted by the room: doesn't count.
         val pending = mapOf(3L to listOf(room("KS-121", Attendee.STATUS_INVITED)))
-        assertNull(RoomCover.cover(meeting, emptyList(), null, listOf(meeting, call), { pending[it.eventId].orEmpty() }, rooms))
+        assertNull(RoomCover.cover(meeting, emptyList(), null, listOf(meeting, call), { pending[it.eventId].orEmpty() }, rooms, me))
+    }
+
+    @Test
+    fun aColleaguesEventInARoomDoesntCount() {
+        val seminar = calEvent(4, "Seminar", day, "14:00", "16:00", organizer = "someone.else@lshtm.ac.uk")
+        val attendees = mapOf(4L to listOf(room("KS-G19")))
+        val of = { e: CalEvent -> attendees[e.eventId].orEmpty() }
+        assertNull(RoomCover.cover(meeting, emptyList(), null, listOf(meeting, seminar), of, rooms, me))
+        assertNull(RoomCover.partial(meeting, listOf(meeting, seminar), of, rooms, london, me))
     }
 
     @Test
@@ -265,8 +275,8 @@ class RoomCoverTest {
         val short = calEvent(3, "call", day, "14:05", "14:30")
         val attendees = mapOf(3L to listOf(room("KS-121")))
         val of = { e: CalEvent -> attendees[e.eventId].orEmpty() }
-        assertNull(RoomCover.cover(meeting, emptyList(), null, listOf(meeting, short), of, rooms))
-        val partial = RoomCover.partial(meeting, listOf(meeting, short), of, rooms, london)!!
+        assertNull(RoomCover.cover(meeting, emptyList(), null, listOf(meeting, short), of, rooms, me))
+        val partial = RoomCover.partial(meeting, listOf(meeting, short), of, rooms, london, me)!!
         assertEquals("KS-121", partial.room)
         assertEquals(LocalTime.of(14, 5), partial.from)
         assertEquals(LocalTime.of(14, 30), partial.to)

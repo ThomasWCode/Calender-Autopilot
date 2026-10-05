@@ -644,7 +644,9 @@ bookings). Where it differs from, or adds to, the sections above:
   the STOP strip, the keyboard hidden, the app brought back to the run's screen),
   `outlook/DebugProbes.kt`, `data/AutopilotDatabase.kt` and `data/BookingStore.kt`, and the screens
   in `ui/` (launcher, Timers, Room booking, wizard and summary, results, Manage bookings, Settings).
-- **Events with a room are hidden** (§3.5, changed by the user).
+- **Events with a room are hidden** (§3.5, changed by the user). "Another event with a room" counts
+  only when the user organised it (their `call` / `Room booking for …` events): a colleague's seminar
+  in a room at the same time doesn't hide the user's meeting (found in review).
 - **Deleting a booking** in Manage bookings records "no room" for that occurrence, so later runs
   list it under "Answered before" instead of asking again (QUESTIONS.md Q2).
 - **Dry runs remember nothing**: no bookings, answers or series memory are written.
@@ -656,6 +658,12 @@ bookings). Where it differs from, or adds to, the sections above:
 - **Reply check.** Each booking's room reply (Reserved, Tentative, Declined) is read from the
   provider when the Room booking, results and Manage screens open, and every 5 s for two minutes on
   the results screen. A booking not found in the calendar 15 minutes after saving is "not found".
+- **Code review fixes (2026-10-05).** STOP no longer leaves Outlook marked busy; Change room leaves
+  the booking's own room out; Change room, Edit people and Delete open each candidate event and act
+  only on the one with the exact title, start and recorded room; once Save is pressed it runs to the
+  end, and an edited event counts as saved when its details come back; replies are paired with
+  bookings by sync id, then room, never one event for two bookings; reply checks run off the main
+  thread; the Alert sheet is no longer mistaken for a form whose default alert is "At time of event".
 - **Prompts are never guessed.** Any question Outlook asks after Save fails that booking (the form
   is discarded, the question logged); the delete prompt is answered only with a known label.
 - **Time picker fixtures are reconstructed**: uiautomator shows nothing of the picker, so its test

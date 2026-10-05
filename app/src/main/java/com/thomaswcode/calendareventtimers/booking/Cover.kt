@@ -19,7 +19,7 @@ sealed interface Cover {
     /** The location names a room from the list, though no room is an invitee. */
     data class LocationNamesRoom(override val room: String) : Cover
 
-    /** Another of the user's events covers the whole time with an accepted room (`call` with KS-121). */
+    /** Another event the user organised covers the whole time with an accepted room (`call` with KS-121). */
     data class OtherEvent(val title: String, override val room: String) : Cover
 }
 
@@ -34,6 +34,10 @@ object RoomCover {
     /** These replies mean the room is (or may still be) held for the booking. */
     private val HOLDING = setOf(RoomReply.WAITING, RoomReply.RESERVED, RoomReply.TENTATIVE)
 
+    /**
+     * [mine] are the user's addresses: only events the user organised count as their room bookings
+     * (a colleague's seminar in a room at the same time doesn't mean the user has a room).
+     */
     fun cover(
         event: CalEvent,
         attendees: List<Attendee>,
@@ -41,6 +45,7 @@ object RoomCover {
         others: List<CalEvent>,
         attendeesOf: (CalEvent) -> List<Attendee>,
         rooms: List<String>,
+        mine: Set<String>,
     ): Cover? {
         if (known != null && known.reply in HOLDING) return Cover.AppBooking(known.room, known.reply)
 
@@ -56,7 +61,7 @@ object RoomCover {
         RoomChoice.roomIn(event.location, rooms)?.let { return Cover.LocationNamesRoom(it) }
 
         for (other in others) {
-            if (other.cancelled || other.occurrenceKey == event.occurrenceKey || other.allDay) continue
+            if (!usable(other, event, mine)) continue
             if (other.begin.isAfter(event.begin) || other.end.isBefore(event.end)) continue
             val room = roomOf(attendeesOf(other), rooms, accepted = true) ?: continue
             return Cover.OtherEvent(other.title.trim(), room.first)
@@ -64,12 +69,17 @@ object RoomCover {
         return null
     }
 
+    /** Another, live, timed event the user organised. */
+    private fun usable(other: CalEvent, event: CalEvent, mine: Set<String>): Boolean =
+        !other.cancelled && other.occurrenceKey != event.occurrenceKey && !other.allDay &&
+            other.organizer?.trim()?.lowercase() in mine
+
     /** The first event with an accepted room overlapping part of [event]'s time. */
     fun partial(
-        event: CalEvent, others: List<CalEvent>, attendeesOf: (CalEvent) -> List<Attendee>, rooms: List<String>, zone: ZoneId,
+        event: CalEvent, others: List<CalEvent>, attendeesOf: (CalEvent) -> List<Attendee>, rooms: List<String>, zone: ZoneId, mine: Set<String>,
     ): PartialCover? {
         for (other in others) {
-            if (other.cancelled || other.occurrenceKey == event.occurrenceKey || other.allDay) continue
+            if (!usable(other, event, mine)) continue
             if (!other.begin.isBefore(event.end) || !other.end.isAfter(event.begin)) continue
             val room = roomOf(attendeesOf(other), rooms, accepted = true) ?: continue
             val from = maxOf(other.begin, event.begin).atZone(zone).toLocalTime().withSecond(0).withNano(0)

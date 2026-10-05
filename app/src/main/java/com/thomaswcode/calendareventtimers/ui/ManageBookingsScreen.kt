@@ -73,9 +73,11 @@ fun ManageBookingsScreen(snackbar: SnackbarHostState, onBack: () -> Unit) {
     LaunchedEffect(state) {
         val s = state
         if (s is ManageController.State.Finished) {
+            // Shown from the screen's scope: clearing the message restarts this effect, which would
+            // cancel a snackbar shown from inside it.
+            scope.launch { snackbar.showNow(s.message) }
             ManageController.clearMessage()
             reloads++
-            snackbar.showNow(s.message)
         }
     }
     var deleting by remember { mutableStateOf<ManagedBooking?>(null) }
