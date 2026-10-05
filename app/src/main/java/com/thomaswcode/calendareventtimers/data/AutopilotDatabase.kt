@@ -143,6 +143,9 @@ interface BookingDao {
     @Query("SELECT * FROM bookings WHERE state = 'SAVED' AND eventDate BETWEEN :from AND :to ORDER BY eventDate, start, id")
     suspend fun savedBetween(from: String, to: String): List<BookingEntity>
 
+    @Query("SELECT * FROM bookings WHERE state = 'SAVED' AND occurrenceKey IN (:keys) ORDER BY createdAt")
+    suspend fun savedForOccurrences(keys: List<String>): List<BookingEntity>
+
     @Query("UPDATE bookings SET roomReply = :reply, bookingSyncId = COALESCE(:syncId, bookingSyncId), checkedAt = :at WHERE id = :id")
     suspend fun setReply(id: Long, reply: RoomReply, syncId: String?, at: Long)
 

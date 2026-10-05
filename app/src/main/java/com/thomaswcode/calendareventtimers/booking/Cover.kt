@@ -94,6 +94,14 @@ object RoomCover {
         return null
     }
 
+    /** A booking event's room and its reply, from its invitees; null when it has no room. */
+    fun roomReply(attendees: List<Attendee>, rooms: List<String>): Pair<String, RoomReply>? {
+        val any = attendees.firstOrNull { a -> a.isResource || RoomChoice.roomIn(a.name, rooms) != null || RoomChoice.roomIn(a.email, rooms) != null }
+            ?: return null
+        val room = RoomChoice.roomIn(any.name, rooms) ?: RoomChoice.roomIn(any.email, rooms) ?: any.name ?: any.email?.substringBefore('@') ?: "a room"
+        return room to reply(any.status)
+    }
+
     fun reply(status: Int): RoomReply = when (status) {
         Attendee.STATUS_ACCEPTED -> RoomReply.RESERVED
         Attendee.STATUS_DECLINED -> RoomReply.DECLINED
