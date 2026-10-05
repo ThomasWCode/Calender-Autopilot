@@ -651,7 +651,7 @@ private fun ResultCard(row: ResultRow, replies: Map<Long, RoomReply>) {
 }
 
 @Composable
-fun ProgressCard(title: String, step: String) {
+fun ProgressCard(title: String, step: String, onStop: () -> Unit = { BookingController.stop() }) {
     Card(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
@@ -660,7 +660,7 @@ fun ProgressCard(title: String, step: String) {
                 Text(title, style = MaterialTheme.typography.titleSmall)
                 Text(step, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            TextButton(onClick = { BookingController.stop() }) { Text("Stop") }
+            TextButton(onClick = onStop) { Text("Stop") }
         }
     }
 }
