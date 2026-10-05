@@ -37,10 +37,17 @@ class OutlookSession private constructor(
 
         val isBusy: Boolean get() = busy.get()
 
+        /** Extra on the intent that brings the app back: which screen the run belongs to. */
+        const val EXTRA_RETURN_TO = "com.thomaswcode.calendareventtimers.RETURN_TO"
+        const val RETURN_TIMERS = "timers"
+        const val RETURN_BOOKING = "booking"
+        const val RETURN_MANAGE = "manage"
+
         suspend fun <T> run(
             service: OutlookReaderService,
             firstStep: String,
             hideKeyboard: Boolean = false,
+            returnTo: String = RETURN_TIMERS,
             onStop: () -> Unit,
             block: suspend (OutlookSession) -> T,
         ): T {
@@ -60,7 +67,7 @@ class OutlookSession private constructor(
                 withContext(NonCancellable + Dispatchers.Main) {
                     overlay.hide()
                     if (hideKeyboard) keyboard(service, AccessibilityService.SHOW_MODE_AUTO)
-                    bringAppBack(service)
+                    bringAppBack(service, returnTo)
                 }
                 busy.set(false)
             }
@@ -71,12 +78,12 @@ class OutlookSession private constructor(
                 .onFailure { ScanLog.w("Couldn't change the keyboard's show mode: ${it.message}") }
         }
 
-        private fun bringAppBack(service: AccessibilityService) {
+        private fun bringAppBack(service: AccessibilityService, returnTo: String) {
             runCatching {
                 service.startActivity(
-                    Intent(service, MainActivity::class.java).addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP,
-                    ),
+                    Intent(service, MainActivity::class.java)
+                        .putExtra(EXTRA_RETURN_TO, returnTo)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
                 )
             }.onFailure { ScanLog.e("Couldn't bring the app back", it) }
         }
