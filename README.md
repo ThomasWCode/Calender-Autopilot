@@ -1,12 +1,14 @@
 # Calendar Autopilot (Android)
 
-Formerly *Calendar Event Timers*. Sets alarms for your Outlook events labelled **Moveable** or **Immoveable**. Tap **Set alarms for
-today** or **Set alarms for tomorrow**; the app reads that day in the Outlook app, lists the
-labelled events, and after you confirm, sets one alarm per event: at the start time, or 5 minutes
-before if you tick that. The alarms are the app's own exact alarms (with a date, unlike the Clock
-app's), ring on the alarm stream, and show over the lock screen.
+Formerly *Calendar Event Timers*. Sets alarms for your Outlook events labelled **Moveable** or
+**Immoveable**. Tap **Set alarms for today** or **Set alarms for tomorrow**; the app reads that day
+in the Outlook app, lists the labelled events, and after you confirm, sets one alarm per event: at
+the start time, or 5 minutes before if you tick that. The alarms are the app's own exact alarms
+(with a date, unlike the Clock app's), ring on the alarm stream, and show over the lock screen.
 
-The design and the reasoning behind it are in [PLAN.md](PLAN.md).
+The design and the reasoning behind it are in [PLAN.md](PLAN.md). Booking rooms for the same
+events, and reusing earlier runs so Outlook is on screen for less time, are planned in
+[PLAN-ROOM-BOOKING.md](PLAN-ROOM-BOOKING.md) (not built yet).
 
 ## Build and install
 
