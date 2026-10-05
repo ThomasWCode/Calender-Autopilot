@@ -2,5 +2,5 @@
 <resources>
     <string name="app_name">Calendar Autopilot</string>
     <string name="accessibility_service_label">Calendar Autopilot – Outlook reader</string>
-    <string name="accessibility_service_description">Reads today\'s or tomorrow\'s events from the Outlook app\'s calendar (Day view) when you tap a button in Calendar Autopilot, so that it can set alarms for events labelled Moveable or Immoveable. It only works inside Outlook, never opens emails, and nothing leaves the phone.</string>
+    <string name="accessibility_service_description">Works in the Outlook app\'s calendar when you tap a button in Calendar Autopilot: it reads the labels (categories) of events, to set alarms for those labelled Moveable or Immoveable, and it creates, changes or deletes the room-booking events you ask for (Room Booking - …), using Outlook\'s Room Finder. It only works inside Outlook, never opens emails, and nothing leaves the phone except what Outlook itself sends for a booking you confirmed.</string>
 </resources>

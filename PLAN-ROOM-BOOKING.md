@@ -1,7 +1,11 @@
 # Calendar Autopilot: room booking, and less time in Outlook
 
-Status: **planned 2026-10-05, not implemented.** Only the rename is done (display name
-*Calendar Autopilot*, formerly *Calendar Event Timers*; the package id is unchanged). The alarm
+Status: **built 2026-10-05 without the phone; not yet run on it.** Everything compiles, lint is
+clean and the unit tests pass, including the screen readers against the Outlook screens captured
+for this plan; what still has to be tried on the Pixel is in [PHONE-CHECKS.md](PHONE-CHECKS.md),
+and the questions that came up while building, with the answers the code assumes meanwhile, are in
+[QUESTIONS.md](QUESTIONS.md). How the build differs from this plan: §9. The app was renamed (display
+name *Calendar Autopilot*, formerly *Calendar Event Timers*; the package id is unchanged). The alarm
 feature and the Outlook findings it rests on are in [PLAN.md](PLAN.md). The Outlook screens and
 calendar data captured for this plan are in [reference/room_booking/](reference/room_booking/README.md).
 
@@ -258,8 +262,9 @@ Checked from the provider, so free of screen time. In order:
 3. **Another of the user's events** covering the whole time with an **accepted** room (`call` with
    KS-121, `Room booking for …`). Partial cover is shown as a note only.
 
-Covered → shown with the reason ("Room already booked: KS-121, by 'call'") and **Book a room? =
-No** by default; the user can still say Yes. A booking whose room **declined** defaults to Yes again.
+Covered → **not shown at all** (the user's decision on 2026-10-05; first planned as shown with
+**Book a room? = No**). Only the log names them. A booking whose room **declined** isn't covered: the
+event is offered again, with Yes.
 
 ### 3.6 People to notify
 
@@ -321,8 +326,8 @@ Memory is never silent: remembered answers are labelled, and Settings can forget
    │          Use these answers for the rest ›    │
    └──────────────────────────────────────────────┘
    ```
-3. **Summary**: every candidate in the range, including covered ones and ones answered before;
-   tapping a row reopens its wizard screen. It names everyone who will be notified and estimates
+3. **Summary**: every candidate in the range, including ones answered before (but never ones
+   that already have a room); tapping a row reopens its wizard screen. It names everyone who will be notified and estimates
    the time Outlook will be on screen. Button: **Book Rooms (n)**.
 
    ```
@@ -585,7 +590,8 @@ Each phase: unit tests pass, an on-phone check, a commit.
 | Data | **Android calendar provider** (read only) for events, invitees and addresses, descriptions, room replies; **Outlook** for labels (cached per change key) and for every change |
 | Days | **Mon–Fri**. Next week = the coming Mon–Fri; also Today, Tomorrow, This week |
 | Events offered | Moveable/Immoveable; timed; same-day; not cancelled or declined; today: not started |
-| Defaults | Book a room = **Yes**; Notify = **No**; last answers per series override; already covered → Book = No |
+| Defaults | Book a room = **Yes**; Notify = **No**; last answers per series override |
+| Events with a room | **Not shown at all** (user, 2026-10-05): an app booking holding its room, a room on the event or in its location, or another of the user's events with an accepted room over the whole time |
 | People | `lshtm.ac.uk`, `student.`, `hon.`, `alumni.lshtm.ac.uk`; never `lists.lshtm.ac.uk`, rooms, the user, or people who declined |
 | Booking event | `Room Booking - {title}`; same date, start, end; same description (formatted); people as **Required**; **Alert None** (like the manual bookings); otherwise Outlook's defaults; location = the room only |
 | Room | First **Free** room in the Settings order through Location → *Or browse with Room Finder* → KS-Rooms; Recent list used only for the first-choice room (switchable) |
@@ -624,3 +630,38 @@ addresses are never offered for notifying).
   provider's calendars, events, attendees, change key and sync timing.
 - [reference/room_booking/time_picker_service_dumps.txt](reference/room_booking/time_picker_service_dumps.txt):
   the picker as the service sees it.
+
+## 9. As built (2026-10-05, without the phone)
+
+Built in five commits after this plan (engine; booking rules; Outlook automation; screens; manage
+bookings). Where it differs from, or adds to, the sections above:
+
+- **Code map.** `calendar/` (CalendarStore, CalendarRows: provider queries and pure row mapping),
+  `engine/` (LabelPass, label cache policy, which occurrence to open per series), `booking/`
+  (Ranges, Rooms, People, Cover, Planner, FormText: pure rules; BookingController and
+  ManageController: the runs), `outlook/BookingReaders.kt` (one reader per booking screen),
+  `outlook/BookingNavigator.kt` (the form), `outlook/OutlookSession.kt` (one Outlook run at a time:
+  the STOP strip, the keyboard hidden, the app brought back to the run's screen),
+  `outlook/DebugProbes.kt`, `data/AutopilotDatabase.kt` and `data/BookingStore.kt`, and the screens
+  in `ui/` (launcher, Timers, Room booking, wizard and summary, results, Manage bookings, Settings).
+- **Events with a room are hidden** (§3.5, changed by the user).
+- **Deleting a booking** in Manage bookings records "no room" for that occurrence, so later runs
+  list it under "Answered before" instead of asking again (QUESTIONS.md Q2).
+- **Dry runs remember nothing**: no bookings, answers or series memory are written.
+- **Events declined by the user** are left out of both features (QUESTIONS.md Q4), and the engine
+  reads Outlook's main calendar only (Q3); the Day view is compared with the provider on every day
+  visited and differences are logged.
+- **Label cache self-check.** If a label read in Outlook ever differs from a remembered one with the
+  same change key, the whole cache is dropped and the log says so.
+- **Reply check.** Each booking's room reply (Reserved, Tentative, Declined) is read from the
+  provider when the Room booking, results and Manage screens open, and every 5 s for two minutes on
+  the results screen. A booking not found in the calendar 15 minutes after saving is "not found".
+- **Prompts are never guessed.** Any question Outlook asks after Save fails that booking (the form
+  is discarded, the question logged); the delete prompt is answered only with a known label.
+- **Time picker fixtures are reconstructed**: uiautomator shows nothing of the picker, so its test
+  fixtures were rebuilt from the service's dump and the screenshots (PHONE-CHECKS.md B and E replace
+  them with real dumps).
+- **Debug probes** try one booking step at a time on whatever Outlook screen is showing, from adb,
+  for the phone checks; logged dumps no longer blank the booking screens.
+- **Navigation.** A cold start, or coming back after 15 minutes away, opens the launcher; after an
+  Outlook run the app returns to that run's screen (QUESTIONS.md Q14).
