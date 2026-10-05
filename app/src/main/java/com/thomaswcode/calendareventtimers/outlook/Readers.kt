@@ -97,15 +97,22 @@ object CalendarReader {
         Collections.newSetFromMap(IdentityHashMap<UiNode, Boolean>()).apply { addAll(nodes) }
 }
 
-private val CALENDAR_AREAS = setOf(WEEK_STRIP_CONTAINER, CALENDAR_VIEWS_CONTAINER, DAY_VIEW_CONTAINER, DETAILS_ROOT)
+private val CALENDAR_AREAS = setOf(
+    WEEK_STRIP_CONTAINER, CALENDAR_VIEWS_CONTAINER, DAY_VIEW_CONTAINER, DETAILS_ROOT,
+    // Booking screens (PLAN-ROOM-BOOKING.md §2.3–2.7); the Compose event form has no ids.
+    OutlookSelectors.PICKER_ROOT, OutlookSelectors.LOCATION_ROOT, OutlookSelectors.PEOPLE_ROOT,
+    OutlookSelectors.DESCRIPTION_FIELD, OutlookSelectors.BUILDING_LIST, OutlookSelectors.ROOM_LIST,
+)
 
 /**
  * A tree dump for the log that keeps to the calendar (PLAN.md: calendar only). Texts are replaced
  * by their lengths on any other Outlook screen (a mail list, a message), and, on the calendar, for
- * off-screen nodes outside its own containers, which could be a covered mail screen.
+ * off-screen nodes outside its own containers, which could be a covered mail screen. The screens
+ * of a room booking (event form, time picker, Add Location, Room Finder, Add People, description,
+ * alert) count as calendar.
  */
 fun UiNode.calendarOnlyDump(maxText: Int = 80): String {
-    val onCalendar = CalendarReader.isCalendar(this) || DetailsReader.isDetails(this)
+    val onCalendar = CalendarReader.isCalendar(this) || DetailsReader.isDetails(this) || BookingScreens.isAny(this)
     return dump(maxText, CALENDAR_AREAS) { node, inArea -> !onCalendar || !(node.visible || inArea) }
 }
 
@@ -169,4 +176,11 @@ object DetailsReader {
 
     private fun texts(root: UiNode, id: String, pick: (UiNode) -> String?): List<String> =
         root.findAll { it.viewId == id }.mapNotNull { cleanUiText(pick(it))?.ifEmpty { null } }.distinct()
+
+    /** The room's reply under its location, e.g. "Reserved" (PLAN-ROOM-BOOKING.md §2.7). */
+    fun locationResponse(root: UiNode): String? =
+        cleanUiText(root.byId(OutlookSelectors.DETAILS_LOCATION_RESPONSE)?.text)?.ifEmpty { null }
+
+    /** The pencil that opens the Edit Event form. */
+    fun editButton(root: UiNode): UiNode? = root.find { it.viewId == OutlookSelectors.DETAILS_EDIT && it.visible }
 }
