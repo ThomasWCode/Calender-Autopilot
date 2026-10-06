@@ -91,21 +91,37 @@ object ManageController {
         val events = main?.let { calendar.occurrencesOn(it, today, last, zone) }.orEmpty()
         val bookingEvents = BookingStore.ownBookingEvents(events, mine)
         val attendees = calendar.attendees((events.map { it.eventId } + bookings.map { it.originalEventId }).distinct())
-        val paired = BookingStore.pair(bookings, bookingEvents) { e -> RoomCover.roomReply(attendees[e.eventId].orEmpty(), rooms)?.first }
-            .values.map { it.occurrenceKey }.toSet()
-        val found = calendarOnly(bookingEvents.filter { it.occurrenceKey !in paired }, events, attendees, rooms, mine)
+        val pairs = BookingStore.pair(bookings, bookingEvents) { e -> RoomCover.roomReply(attendees[e.eventId].orEmpty(), rooms)?.first }
+        val paired = pairs.values.map { it.occurrenceKey }.toSet()
+        // Events that may be one of the app's own (unsure which) aren't listed as found in the calendar.
+        val unsure = BookingStore.unsure(bookings, bookingEvents, pairs).let { ids -> bookings.filter { it.id in ids } }
+        val found = calendarOnly(
+            bookingEvents.filter { e -> e.occurrenceKey !in paired && unsure.none { BookingStore.matches(e, it) } }, events, attendees, rooms, mine,
+        )
         val all = (bookings.map { it to false } + found.map { it to true }).sortedWith(compareBy({ it.first.eventDate }, { it.first.start }))
         if (all.isEmpty()) return@withContext emptyList()
-        val labels = AutopilotDatabase.get(app).labels().get(all.map { it.first.occurrenceKey.substringBeforeLast('@') }.distinct())
+        val originals = all.associate { (b, _) -> b.id to originalOf(b, events) }
+        val labels = AutopilotDatabase.get(app).labels().get(originals.values.mapNotNull { it?.labelKey }.distinct())
             .associate { it.labelKey to ListCodec.decode(it.categories) }
         val names = store.names(all.flatMap { ListCodec.decode(it.first.notified) })
         all.map { (b, fromCalendar) ->
             val notified = ListCodec.decode(b.notified).map { Person(it, names[it]) }
-            val original = events.firstOrNull { it.occurrenceKey == b.occurrenceKey }
+            val original = originals[b.id]
             val offered = original?.let { People.toNotify(attendees[it.eventId].orEmpty(), it.organizer, mine, rooms) }.orEmpty()
             ManagedBooking(b, notified, (offered + notified).distinctBy { it.email }, warnings(b, original, events, labels, main != null), fromCalendar)
         }
     }
+
+    /**
+     * The meeting [b] is for: by its occurrence key, else (the key changed with a sync id that came
+     * or changed later) the same event row at the same date and start.
+     */
+    internal fun originalOf(b: BookingEntity, events: List<CalEvent>): CalEvent? =
+        events.firstOrNull { it.occurrenceKey == b.occurrenceKey }
+            ?: events.firstOrNull {
+                it.eventId == b.originalEventId && !BookingRules.isRoomBooking(it.title) &&
+                    it.date.toString() == b.eventDate && TriggerTime.formatHhMm(it.start) == b.start
+            }
 
     /**
      * The user's live booking events among [unpaired] (none of the app's records is theirs), as

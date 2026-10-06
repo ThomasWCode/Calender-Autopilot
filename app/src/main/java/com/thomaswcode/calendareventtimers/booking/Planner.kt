@@ -132,7 +132,8 @@ object BookingPlanner {
                 defaults = defaults.copy(removed = defaults.removed.filter { r -> people.any { it.email == r } }.toSet()),
                 remembered = memory != null,
                 previous = previous,
-                partial = RoomCover.partial(e, input.events, attendeesOf, input.rooms, input.zone, mine),
+                // Its own booking for part of the time first: it may not be in the calendar yet.
+                partial = RoomCover.partialFromKnown(known, e) ?: RoomCover.partial(e, input.events, attendeesOf, input.rooms, input.zone, mine),
                 roomDeclined = declined,
                 roomRemoved = removed,
             )

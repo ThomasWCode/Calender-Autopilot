@@ -72,14 +72,18 @@ class OutlookSession private constructor(
                 return block(session)
             } finally {
                 try {
-                    withContext(NonCancellable + Dispatchers.Main) {
-                        overlay.hide()
-                        if (hideKeyboard) keyboard(service, AccessibilityService.SHOW_MODE_AUTO)
-                        bringAppBack(service, returnTo)
+                    // Two steps: the main thread is left for the NonCancellable context, which isn't
+                    // cancelled, and that one returns without a dispatch. One step (NonCancellable +
+                    // Main) would throw on its way back into a stopped run, replacing whatever the run
+                    // was ending with (a ScanFailure saying a form is still open) by "stopped".
+                    withContext(NonCancellable) {
+                        withContext(Dispatchers.Main) {
+                            overlay.hide()
+                            if (hideKeyboard) keyboard(service, AccessibilityService.SHOW_MODE_AUTO)
+                            bringAppBack(service, returnTo)
+                        }
                     }
                 } finally {
-                    // After STOP the withContext above throws on its way back (it switched dispatcher in
-                    // a cancelled coroutine), so the flag is released here, or Outlook stays "busy".
                     busy.set(false)
                 }
             }
