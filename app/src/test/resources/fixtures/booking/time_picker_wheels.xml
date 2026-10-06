@@ -1,0 +1,61 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<!-- RECONSTRUCTED, not a uiautomator dump: uiautomator shows nothing of this screen. Structure and
+     bounds from the accessibility service's own dump on the Pixel (2026-10-05,
+     reference/room_booking/time_picker_service_dumps.txt); texts from time_picker_wheels_start.png.
+     The X's and the mode button's descriptions weren't seen in clear and are left out. -->
+<hierarchy rotation="0">
+  <node class="android.widget.FrameLayout" bounds="[0,0][1080,2400]">
+    <node class="android.widget.FrameLayout" resource-id="com.microsoft.office.outlook:id/action_bar_root" bounds="[0,0][1080,2400]">
+      <node class="android.widget.FrameLayout" resource-id="android:id/content" bounds="[0,0][1080,2400]">
+        <node class="android.widget.FrameLayout" resource-id="com.microsoft.office.outlook:id/protection_layout" bounds="[0,0][1080,2400]">
+          <node class="androidx.compose.ui.platform.ComposeView" bounds="[0,0][1080,2400]">
+            <node class="android.view.View" bounds="[0,0][1080,2400]">
+              <node class="z" visible-to-user="false" bounds="[0,121][1080,2337]">
+                <node class="android.widget.LinearLayout" resource-id="com.microsoft.office.outlook:id/root_calendar_views_container" bounds="[0,121][1080,2337]">
+                  <node class="android.view.ViewGroup" resource-id="com.microsoft.office.outlook:id/toolbar" bounds="[0,121][1080,268]">
+                    <node class="android.widget.ImageButton" clickable="true" bounds="[0,121][147,268]" />
+                    <node class="android.widget.Button" resource-id="com.microsoft.office.outlook:id/calendar_month_title_button" text="Choose Time" clickable="true" bounds="[189,121][543,268]" />
+                    <node class="androidx.appcompat.widget.LinearLayoutCompat" bounds="[826,121][1080,268]">
+                      <node class="android.widget.Button" resource-id="com.microsoft.office.outlook:id/action_picker_mode" clickable="true" bounds="[826,131][953,257]" />
+                      <node class="android.widget.Button" resource-id="com.microsoft.office.outlook:id/action_done" content-desc="Done" clickable="true" bounds="[953,131][1080,257]" />
+                    </node>
+                  </node>
+                  <node class="android.view.View" resource-id="com.microsoft.office.outlook:id/calendar_bottom_divider" bounds="[0,268][1080,269]" />
+                  <node class="android.widget.LinearLayout" resource-id="com.microsoft.office.outlook:id/date_time_picker" bounds="[0,269][1080,2337]">
+                    <node class="android.view.ViewGroup" resource-id="com.microsoft.office.outlook:id/date_time_picker_container" bounds="[0,269][1080,1281]">
+                      <node class="android.widget.HorizontalScrollView" resource-id="com.microsoft.office.outlook:id/start_end_time_tab" bounds="[42,269][1038,399]">
+                        <node class="android.widget.LinearLayout" bounds="[42,269][1038,399]">
+                          <node class="android.widget.LinearLayout" content-desc="Start time" selected="true" bounds="[42,269][540,399]">
+                            <node class="android.widget.TextView" text="Start time" selected="true" bounds="[183,301][399,367]" />
+                          </node>
+                          <node class="android.widget.LinearLayout" content-desc="End time" clickable="true" bounds="[540,269][1038,399]">
+                            <node class="android.widget.TextView" text="End time" bounds="[693,301][885,367]" />
+                          </node>
+                        </node>
+                      </node>
+                      <node class="android.widget.NumberPicker" scrollable="true" visible-to-user="false" bounds="[0,0][0,0]">
+                        <node class="android.widget.Button" text="Sun 11 Oct" clickable="true" visible-to-user="false" bounds="[99,399][530,777]" />
+                        <node class="android.widget.EditText" resource-id="com.microsoft.office.outlook:id/numberpicker_input" text="Mon 12 Oct" content-desc="Mon 12 Oct" clickable="true" visible-to-user="false" bounds="[99,777][530,903]" />
+                        <node class="android.widget.Button" text="Tue 13 Oct" clickable="true" visible-to-user="false" bounds="[99,903][530,1281]" />
+                      </node>
+                      <node class="android.widget.NumberPicker" scrollable="true" visible-to-user="false" bounds="[0,0][0,0]">
+                        <node class="android.widget.Button" text="7" clickable="true" visible-to-user="false" bounds="[630,399][756,777]" />
+                        <node class="android.widget.EditText" resource-id="com.microsoft.office.outlook:id/numberpicker_input" text="8" content-desc="8" clickable="true" visible-to-user="false" bounds="[630,777][756,903]" />
+                        <node class="android.widget.Button" text="9" clickable="true" visible-to-user="false" bounds="[630,903][756,1281]" />
+                      </node>
+                      <node class="android.widget.NumberPicker" scrollable="true" visible-to-user="false" bounds="[0,0][0,0]">
+                        <node class="android.widget.Button" text="04" clickable="true" visible-to-user="false" bounds="[855,399][981,777]" />
+                        <node class="android.widget.EditText" resource-id="com.microsoft.office.outlook:id/numberpicker_input" text="05" content-desc="05" clickable="true" visible-to-user="false" bounds="[855,777][981,903]" />
+                        <node class="android.widget.Button" text="06" clickable="true" visible-to-user="false" bounds="[855,903][981,1281]" />
+                      </node>
+                    </node>
+                  </node>
+                </node>
+              </node>
+            </node>
+          </node>
+        </node>
+      </node>
+    </node>
+  </node>
+</hierarchy>

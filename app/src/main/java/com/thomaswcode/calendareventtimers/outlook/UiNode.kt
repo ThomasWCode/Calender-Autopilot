@@ -29,6 +29,13 @@ interface UiNode {
 
     /** False for nodes in the tree but outside the screen (uiautomator dumps leave those out). */
     val visible: Boolean get() = true
+
+    val checkable: Boolean get() = false
+    val checked: Boolean get() = false
+    val focused: Boolean get() = false
+
+    /** A text field; uiautomator dumps don't say, the service does (WebView editors included). */
+    val editable: Boolean get() = false
 }
 
 fun UiNode.walk(): Sequence<UiNode> = sequence {
@@ -69,6 +76,9 @@ fun UiNode.dump(
         if (node.clickable) append(" [click]")
         if (node.scrollable) append(" [scroll]")
         if (node.selected) append(" [selected]")
+        if (node.checked) append(" [checked]")
+        if (node.editable) append(" [editable]")
+        if (node.focused) append(" [focused]")
         if (!node.visible) append(" [offscreen]")
         append(' ').append(node.bounds).append('\n')
         for (child in node.children) line(child, depth + 1, inArea)

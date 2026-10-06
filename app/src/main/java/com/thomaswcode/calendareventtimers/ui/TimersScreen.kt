@@ -1,6 +1,7 @@
 package com.thomaswcode.calendareventtimers.ui
 
 import android.Manifest
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
@@ -82,14 +84,17 @@ private val alarmDay = DateTimeFormatter.ofPattern("EEE d MMM", Locale.UK)
 private val alarmTime = DateTimeFormatter.ofPattern("HH:mm")
 private val testTime = DateTimeFormatter.ofPattern("HH:mm:ss")
 
+/** Timers (formerly the home screen): today's and tomorrow's scans, and the upcoming alarms. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(
+fun TimersScreen(
     scan: ScanController.State,
     snackbar: SnackbarHostState,
+    onBack: () -> Unit,
     onOpenSetup: () -> Unit,
     onOpenLog: () -> Unit,
 ) {
+    BackHandler(onBack = onBack)
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val store = remember { AlarmStore.get(context) }
@@ -152,7 +157,8 @@ fun HomeScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Calendar Autopilot") },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
+                title = { Text("Timers") },
                 actions = {
                     var menu by remember { mutableStateOf(false) }
                     IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More") }
@@ -291,7 +297,7 @@ private fun RunningCard(scan: ScanController.State.Running, onStop: () -> Unit) 
             CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text("Reading Outlook for ${EventParser.dayLabel(scan.target)}…", style = MaterialTheme.typography.titleSmall)
+                Text("Checking ${EventParser.dayLabel(scan.target)}…", style = MaterialTheme.typography.titleSmall)
                 Text(scan.step, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             TextButton(onClick = onStop) { Text("Stop") }
@@ -303,7 +309,7 @@ private fun RunningCard(scan: ScanController.State.Running, onStop: () -> Unit) 
 private fun FailedCard(scan: ScanController.State.Failed, onRetry: () -> Unit, onDismiss: () -> Unit, onOpenLog: () -> Unit) {
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
         Column(Modifier.padding(16.dp)) {
-            Text("Couldn't read Outlook for ${EventParser.dayLabel(scan.target)}", style = MaterialTheme.typography.titleMedium)
+            Text("Couldn't check ${EventParser.dayLabel(scan.target)}", style = MaterialTheme.typography.titleMedium)
             Text(scan.message, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
             Text("No alarms were set.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {

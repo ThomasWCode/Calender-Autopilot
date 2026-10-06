@@ -98,8 +98,14 @@ object EventParser {
         return rows.sortedBy { row -> position.indexOf(squash(row)).let { if (it < 0) Int.MAX_VALUE else it } }
     }
 
-    /** Whether a Day-view description is about an event called [title] (it always contains the title). */
-    fun descMentions(desc: String, title: String): Boolean = squash(desc).contains(squash(title))
+    /**
+     * Whether a Day-view description is about an event called [title] (it always contains the title).
+     * Both are compared as titles are ([cleanUiText], spaces collapsed, any case): the calendar's title
+     * may hold a non-breaking space or a bidi mark that Outlook shows as a space or not at all.
+     */
+    fun descMentions(desc: String, title: String): Boolean = mentionForm(desc).contains(mentionForm(title))
+
+    private fun mentionForm(s: String) = squash(cleanUiText(s).orEmpty()).lowercase()
 
     private fun squash(s: String) = s.replace(Regex("""\s+"""), " ").trim()
 

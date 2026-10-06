@@ -97,15 +97,22 @@ object CalendarReader {
         Collections.newSetFromMap(IdentityHashMap<UiNode, Boolean>()).apply { addAll(nodes) }
 }
 
-private val CALENDAR_AREAS = setOf(WEEK_STRIP_CONTAINER, CALENDAR_VIEWS_CONTAINER, DAY_VIEW_CONTAINER, DETAILS_ROOT)
+private val CALENDAR_AREAS = setOf(
+    WEEK_STRIP_CONTAINER, CALENDAR_VIEWS_CONTAINER, DAY_VIEW_CONTAINER, DETAILS_ROOT,
+    // Booking screens (PLAN-ROOM-BOOKING.md §2.3–2.7); the Compose event form has no ids.
+    OutlookSelectors.PICKER_ROOT, OutlookSelectors.LOCATION_ROOT, OutlookSelectors.PEOPLE_ROOT,
+    OutlookSelectors.DESCRIPTION_FIELD, OutlookSelectors.BUILDING_LIST, OutlookSelectors.ROOM_LIST,
+)
 
 /**
  * A tree dump for the log that keeps to the calendar (PLAN.md: calendar only). Texts are replaced
  * by their lengths on any other Outlook screen (a mail list, a message), and, on the calendar, for
- * off-screen nodes outside its own containers, which could be a covered mail screen.
+ * off-screen nodes outside its own containers, which could be a covered mail screen. The screens
+ * of a room booking (event form, time picker, Add Location, Room Finder, Add People, description,
+ * alert) count as calendar.
  */
 fun UiNode.calendarOnlyDump(maxText: Int = 80): String {
-    val onCalendar = CalendarReader.isCalendar(this) || DetailsReader.isDetails(this)
+    val onCalendar = CalendarReader.isCalendar(this) || DetailsReader.isDetails(this) || BookingScreens.isAny(this)
     return dump(maxText, CALENDAR_AREAS) { node, inArea -> !onCalendar || !(node.visible || inArea) }
 }
 
@@ -119,6 +126,8 @@ data class DetailsRead(
     val locations: List<String>,
     val categoryRowFound: Boolean,
     val categories: List<String>,
+    /** Same-day events only: the end in "14:00 to 14:55, duration: …". */
+    val end: LocalTime? = null,
 ) {
     /** The locations joined as the Day view's description joins them. */
     val location: String? get() = locations.joinToString("; ").ifEmpty { null }
@@ -134,6 +143,7 @@ data class DetailsRead(
         locations = if (later.locations.size > locations.size) later.locations else locations,
         categoryRowFound = categoryRowFound || later.categoryRowFound,
         categories = if (categoryRowFound) categories else later.categories,
+        end = end ?: later.end,
     )
 }
 
@@ -164,9 +174,21 @@ object DetailsReader {
             locations = rows,
             categoryRowFound = row != null,
             categories = categories,
+            // A multi-day event (its own start time field) has no end in this form.
+            end = if (root.byId(DETAILS_START_TIME) != null) null else sameDayEnd.find(cleanUiText(endDate?.desc).orEmpty())?.let { EventParser.parseTime(it.groupValues[1]) },
         )
     }
 
+    /** "14:00 to 14:55, duration: 55 minutes": the second time. */
+    private val sameDayEnd = Regex("""^\s*\d{1,2}[:.]\d{2}(?:\s*[AaPp]\.?\s*[Mm]\.?)?\s+to\s+(\d{1,2}[:.]\d{2}(?:\s*[AaPp]\.?\s*[Mm]\.?)?)""")
+
     private fun texts(root: UiNode, id: String, pick: (UiNode) -> String?): List<String> =
         root.findAll { it.viewId == id }.mapNotNull { cleanUiText(pick(it))?.ifEmpty { null } }.distinct()
+
+    /** The room's reply under its location, e.g. "Reserved" (PLAN-ROOM-BOOKING.md §2.7). */
+    fun locationResponse(root: UiNode): String? =
+        cleanUiText(root.byId(OutlookSelectors.DETAILS_LOCATION_RESPONSE)?.text)?.ifEmpty { null }
+
+    /** The pencil that opens the Edit Event form. */
+    fun editButton(root: UiNode): UiNode? = root.find { it.viewId == OutlookSelectors.DETAILS_EDIT && it.visible }
 }

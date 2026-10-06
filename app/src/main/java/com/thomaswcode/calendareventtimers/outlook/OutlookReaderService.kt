@@ -38,6 +38,13 @@ class OutlookReaderService : AccessibilityService() {
             scope.launch { ScanLog.dump("Debug dump", UiDriver(this@OutlookReaderService).snapshot().calendarOnlyDump(maxText = 200)) }
         }
     }
+
+    /** Debug builds only: one booking step on the current screen ([DebugProbes], PHONE-CHECKS.md). */
+    private val debugProbe = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            scope.launch { runCatching { DebugProbes.run(this@OutlookReaderService, intent) }.onFailure { ScanLog.e("Probe failed", it) } }
+        }
+    }
     private var debugDumpRegistered = false
 
     override fun onServiceConnected() {
@@ -47,6 +54,7 @@ class OutlookReaderService : AccessibilityService() {
         if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
             // Only senders holding DUMP (adb's shell has it; ordinary apps don't) can ask.
             registerReceiver(debugDump, IntentFilter(ACTION_DEBUG_DUMP), Manifest.permission.DUMP, null, RECEIVER_EXPORTED)
+            registerReceiver(debugProbe, IntentFilter(DebugProbes.ACTION), Manifest.permission.DUMP, null, RECEIVER_EXPORTED)
             debugDumpRegistered = true
         }
         ScanLog.i("Outlook reader connected")
@@ -69,6 +77,7 @@ class OutlookReaderService : AccessibilityService() {
     private fun release() {
         if (debugDumpRegistered) {
             runCatching { unregisterReceiver(debugDump) }
+            runCatching { unregisterReceiver(debugProbe) }
             debugDumpRegistered = false
         }
         if (instance === this) {

@@ -1,7 +1,12 @@
 # Calendar Autopilot: room booking, and less time in Outlook
 
-Status: **planned 2026-10-05, not implemented.** Only the rename is done (display name
-*Calendar Autopilot*, formerly *Calendar Event Timers*; the package id is unchanged). The alarm
+Status: **built 2026-10-05 without the phone, reviewed 2026-10-06 (PR #1: eight rounds of Codex's
+review and another agent's review); not yet run on the phone.** Everything compiles, lint is
+clean and the unit tests pass, including the screen readers against the Outlook screens captured
+for this plan; what still has to be tried on the Pixel is in [PHONE-CHECKS.md](PHONE-CHECKS.md),
+and the questions that came up while building, with the answers the code assumes meanwhile, are in
+[QUESTIONS.md](QUESTIONS.md). How the build differs from this plan: §9. The app was renamed (display
+name *Calendar Autopilot*, formerly *Calendar Event Timers*; the package id is unchanged). The alarm
 feature and the Outlook findings it rests on are in [PLAN.md](PLAN.md). The Outlook screens and
 calendar data captured for this plan are in [reference/room_booking/](reference/room_booking/README.md).
 
@@ -248,18 +253,21 @@ on the same day, isn't cancelled or declined by the user, isn't one of the app's
 
 Checked from the provider, so free of screen time. In order:
 
-1. **An app booking**: a `bookings` row for this occurrence that isn't deleted, or a provider
-   event titled `Room Booking - {title}` starting at the same time (finds bookings the database
-   doesn't know, e.g. after a reinstall). Its room's reply gives Reserved / Waiting / **Declined**.
+1. **An app booking** for the meeting's whole time: a `bookings` row for this occurrence that isn't
+   deleted, or a provider event of the user's titled `Room Booking - {title}` starting at the same
+   time (finds bookings the database doesn't know, e.g. after a reinstall; a colleague's event of
+   that name doesn't count). Its room's reply gives Reserved / Waiting / **Declined**. A booking
+   shorter than the meeting (made longer since) doesn't count; it shows as a note.
 2. **A room on the event itself**: a type-3 attendee, or an attendee whose name or address matches
    a room in the list, that hasn't declined (`… [room added]`, a colleague's meeting in KS-103D).
-   Also when the location names a room in the list but no room is an attendee ("Location says
-   KS-103D", unconfirmed).
+   Also when the location names a room in the list that isn't an attendee ("Location says
+   KS-103D", unconfirmed); a room that declined stays in the location, so it doesn't count there.
 3. **Another of the user's events** covering the whole time with an **accepted** room (`call` with
    KS-121, `Room booking for …`). Partial cover is shown as a note only.
 
-Covered → shown with the reason ("Room already booked: KS-121, by 'call'") and **Book a room? =
-No** by default; the user can still say Yes. A booking whose room **declined** defaults to Yes again.
+Covered → **not shown at all** (the user's decision on 2026-10-05; first planned as shown with
+**Book a room? = No**). Only the log names them. A booking whose room **declined**, or that no
+longer has a room, isn't covered: the event is offered again, with Yes.
 
 ### 3.6 People to notify
 
@@ -301,7 +309,9 @@ Memory is never silent: remembered answers are labelled, and Settings can forget
 
 1. Tap a range → label pass in Outlook if needed (overlay as now) → back in the app.
 2. **Wizard**: one screen per candidate that isn't covered and has no answer yet, pre-filled, so an
-   unchanged event is one **Next**. *Use these answers for the rest* jumps to the summary.
+   unchanged event is one **Next**. *Keep the rest as suggested* jumps to the summary, the
+   remaining events keeping their suggested answers (renamed from *Use these answers for the rest*,
+   which promised copying the current answers, 2026-10-06).
 
    ```
    ┌──────────────────────────────────────────────┐
@@ -318,11 +328,11 @@ Memory is never silent: remembered answers are labelled, and Settings can forget
    │   (answers as last time)                     │
    │                                              │
    │ [ Back ]                          [ Next ]   │
-   │          Use these answers for the rest ›    │
+   │              Keep the rest as suggested ›    │
    └──────────────────────────────────────────────┘
    ```
-3. **Summary**: every candidate in the range, including covered ones and ones answered before;
-   tapping a row reopens its wizard screen. It names everyone who will be notified and estimates
+3. **Summary**: every candidate in the range, including ones answered before (but never ones
+   that already have a room); tapping a row reopens its wizard screen. It names everyone who will be notified and estimates
    the time Outlook will be on screen. Button: **Book Rooms (n)**.
 
    ```
@@ -456,7 +466,8 @@ return first Free room of prefs in seen, else NONE
   list*. Stored in preferences as a JSON list.
 - Room Finder building: `KS-Rooms`.
 - *Use the Recent list for the first-choice room* (on).
-- Memory: *Forget remembered answers*; *Read all labels again next time*.
+- Memory: what is remembered, counted; **Clear memory** (everything); *Forget remembered answers*;
+  *Read all labels again next time*.
 - My addresses (learnt, editable): left out of notify lists.
 
 The LSHTM domains and Mon–Fri are fixed in code (decided above), not settings.
@@ -585,7 +596,8 @@ Each phase: unit tests pass, an on-phone check, a commit.
 | Data | **Android calendar provider** (read only) for events, invitees and addresses, descriptions, room replies; **Outlook** for labels (cached per change key) and for every change |
 | Days | **Mon–Fri**. Next week = the coming Mon–Fri; also Today, Tomorrow, This week |
 | Events offered | Moveable/Immoveable; timed; same-day; not cancelled or declined; today: not started |
-| Defaults | Book a room = **Yes**; Notify = **No**; last answers per series override; already covered → Book = No |
+| Defaults | Book a room = **Yes**; Notify = **No**; last answers per series override |
+| Events with a room | **Not shown at all** (user, 2026-10-05): an app booking holding its room, a room on the event or in its location, or another of the user's events with an accepted room over the whole time |
 | People | `lshtm.ac.uk`, `student.`, `hon.`, `alumni.lshtm.ac.uk`; never `lists.lshtm.ac.uk`, rooms, the user, or people who declined |
 | Booking event | `Room Booking - {title}`; same date, start, end; same description (formatted); people as **Required**; **Alert None** (like the manual bookings); otherwise Outlook's defaults; location = the room only |
 | Room | First **Free** room in the Settings order through Location → *Or browse with Room Finder* → KS-Rooms; Recent list used only for the first-choice room (switchable) |
@@ -624,3 +636,124 @@ addresses are never offered for notifying).
   provider's calendars, events, attendees, change key and sync timing.
 - [reference/room_booking/time_picker_service_dumps.txt](reference/room_booking/time_picker_service_dumps.txt):
   the picker as the service sees it.
+
+## 9. As built (2026-10-05, without the phone)
+
+Built in five commits after this plan (engine; booking rules; Outlook automation; screens; manage
+bookings). Where it differs from, or adds to, the sections above:
+
+- **Code map.** `calendar/` (CalendarStore, CalendarRows: provider queries and pure row mapping),
+  `engine/` (LabelPass, label cache policy, which occurrence to open per series), `booking/`
+  (Ranges, Rooms, People, Cover, Planner, FormText: pure rules; BookingController and
+  ManageController: the runs), `outlook/BookingReaders.kt` (one reader per booking screen),
+  `outlook/BookingNavigator.kt` (the form), `outlook/OutlookSession.kt` (one Outlook run at a time:
+  the STOP strip, the keyboard hidden, the app brought back to the run's screen),
+  `outlook/DebugProbes.kt`, `data/AutopilotDatabase.kt` and `data/BookingStore.kt`, and the screens
+  in `ui/` (launcher, Timers, Room booking, wizard and summary, results, Manage bookings, Settings).
+- **Events with a room are hidden** (§3.5, changed by the user). "Another event with a room" counts
+  only when the user organised it (their `call` / `Room booking for …` events): a colleague's seminar
+  in a room at the same time doesn't hide the user's meeting (found in review).
+- **Deleting a booking** in Manage bookings is temporary: nothing about it is remembered, so later
+  runs offer the event again (the user's answer to QUESTIONS.md Q2, 2026-10-06).
+- **Clear memory** (Settings, 2026-10-06): one button forgets everything remembered (answers per
+  meeting and per event, labels read in Outlook, people's names), with the counts shown above it and
+  a confirmation; bookings, alarms and settings stay. Forgetting only the answers or only the labels
+  is still offered.
+- **Dry runs record no bookings or answers** (occurrence answers and series memory); labels read in
+  Outlook and people's names are remembered as in any run. Manage bookings is always real.
+- **Events declined by the user** are left out of both features (QUESTIONS.md Q4), and the engine
+  reads Outlook's main calendar only (Q3); the Day view is compared with the provider on every day
+  visited and differences are logged.
+- **Label cache self-check.** If a label read in Outlook ever differs from a remembered one with the
+  same change key, the whole cache is dropped and the log says so.
+- **Reply check.** Each booking's room reply (Reserved, Tentative, Declined) is read from the
+  provider when the Room booking, results and Manage screens open, and every 5 s for two minutes on
+  the results screen. A booking not found in the calendar 15 minutes after saving is "not found";
+  one found without a room 15 minutes after it was made or its room changed is "no room" (taken off
+  in Outlook), which doesn't hold the event's room.
+- **Codex review fixes (2026-10-06).** Events sharing a day, a start and a title look the same in
+  the Day view, so their labels are read from every block that may be one of them and kept only if
+  all agree (never one event's labels for another). Rooms are matched by whole name, so KS-103
+  never passes for KS-103D when Manage bookings picks the event to change or delete. Just before
+  each booking, the event is checked in the provider again: one moved, renamed, cancelled, declined,
+  started or given a room since the wizard isn't booked ("not done", run again), and people no
+  longer invited aren't told. A form that can't be left without saving fails its booking instead of
+  being reported as discarded.
+- **Second round (2026-10-06): Codex's second review and another agent's review.**
+  - *Edits act on one event only.* Manage bookings opens every event that could be the booking and
+    acts only when exactly one fits its title, start, end (from the details screen) and room; two
+    that fit stop it, as Outlook doesn't show which is which.
+  - *STOP can't lose a change.* What a Manage change did is recorded inside the Outlook run, before
+    it tidies up; a confirmed delete runs to its end like Save.
+  - *"Maybe saved" is said so.* If Outlook goes somewhere unexpected after Save, the result says to
+    check Outlook (not "not booked" or "nothing changed"); a new booking is kept as one until the
+    calendar shows whether it was saved (missing after the sync grace if not).
+  - *A form that can't be closed after a failed step stops the run*, so nothing else goes into it.
+  - *Replies belong to rooms.* Only the booking's own room's reply counts; after a room change the
+    calendar may still show the old room for a while, and after the sync grace a room changed in
+    Outlook is followed. A booking whose event has been seen is followed by its sync id only, at its
+    own time: moved or gone, it is missing, never given a lookalike. Cancelled events are ignored.
+  - *Cover is the user's own and whole* (§3.5), and the check before booking uses the same rules,
+    except for bookings made earlier in the same run.
+  - *People.* Each person told must show on a chip by address before Save, and a removal is checked
+    the same way (by the chip's description or its text); the user's own form address is never added.
+  - *The form's account must be an LSHTM one* (several accounts in Outlook), and the run's own
+    addresses grow as the form shows them.
+  - *Labels.* If the change key proves unreliable mid-run, the labels the run took from memory are
+    left out too (with a message to run again), not only forgotten for next time.
+  - *Small ones.* Only a plain "Free" is free; an invalid `&#…;` in a description is kept as
+    written; the people dialog scrolls; week summaries count only bookings holding a room as
+    booked and name missing ones; the wizard's shortcut is renamed (§3.8); Manage bookings lists
+    the user's booking events it has no record of.
+  - *Not done:* a fake-driver harness for testing whole booking and edit sequences (the other
+    review's I09); the pure rules and readers are tested, and the sequences are in PHONE-CHECKS.md.
+- **Third round (Codex, 2026-10-06).** A booking missing from the calendar gets the same sync grace
+  after a change as one missing its room (keeping its last reply meanwhile); only the user's own
+  `Room Booking - …` events are paired with the app's bookings; a booking made shorter or longer in
+  Outlook takes its event's end, so cover follows it; answering yes clears an earlier "no room" for
+  that occurrence at once; the clipboard is cleared even when STOP lands mid-paste.
+- **Fourth round (Codex, 2026-10-06).** STOP with a form that can't be closed says so (the run's
+  tidy-up no longer turns that into a plain "stopped": it leaves the main thread through a
+  non-cancellable step, tested); new bookings that look alike (title, time, room, end) are left
+  unpaired until something tells them apart, instead of being tied by list order; Day-view
+  entries are matched to titles as titles are compared (invisible marks, non-breaking spaces,
+  case); a meeting's own booking for part of its time shows as a note even before the calendar
+  has it; Manage bookings finds a meeting again by its row and time after its sync id changes.
+- **Fifth round (Codex, 2026-10-06).** A booking is refused when the form's account can't be read,
+  not only when it is another one; titles from the phone's calendar are cleaned as Outlook's are,
+  so an alarm set by a whole-day scan isn't set again; a booking found only in the calendar isn't
+  linked to a meeting when two of that title are at its time; a new booking is tied to a lone event
+  at its time with another room only after the sync grace (before, it may be an old one).
+- **Sixth round (Codex, 2026-10-06).** The main calendar is the LSHTM account's "Calendar" only
+  (other accounts in Outlook have one too; two LSHTM ones are refused as unclear); while a new
+  booking syncs, an event whose room declined isn't taken as its own (it may be an old booking);
+  Change room refuses a booking with locations besides rooms, which clearing would remove; the
+  people told are read from the booking event (changed in Outlook, the record follows); a booking
+  found only in the calendar that was just changed is marked as waiting for Outlook to sync, can't
+  be changed again meanwhile, and the screen looks again every 5 s for 2 minutes.
+- **Seventh round (Codex, 2026-10-06).** A "maybe saved" booking is recorded even when Outlook can't
+  be brought back afterwards (the run then stops); a block at the same time that can't be read
+  leaves the labels uncertain (it may be the event itself); every change in Manage bookings gets
+  the 2-minute sync hold: edited people aren't overwritten by the calendar's old list, and a
+  deleted booking isn't shown again as found in the calendar; the relabelled warning uses only
+  labels still valid for the meeting as it is now.
+- **The screen stays upright** during every Outlook run (the user's request, 2026-10-06): the STOP
+  strip asks for portrait, which Android honours for any visible window, as if auto-rotate were off.
+  Nothing to restore: the hold goes with the strip, even if the app crashes. If the run starts
+  sideways, it waits for the screen to turn first. The system auto-rotate setting is never touched
+  (that would need the *Modify system settings* permission and restoring; QUESTIONS.md Q17).
+- **Code review fixes (2026-10-05).** STOP no longer leaves Outlook marked busy; Change room leaves
+  the booking's own room out; Change room, Edit people and Delete open each candidate event and act
+  only on the one with the exact title, start and recorded room; once Save is pressed it runs to the
+  end, and an edited event counts as saved when its details come back; replies are paired with
+  bookings by sync id, then room, never one event for two bookings; reply checks run off the main
+  thread; the Alert sheet is no longer mistaken for a form whose default alert is "At time of event".
+- **Prompts are never guessed.** Any question Outlook asks after Save fails that booking (the form
+  is discarded, the question logged); the delete prompt is answered only with a known label.
+- **Time picker fixtures are reconstructed**: uiautomator shows nothing of the picker, so its test
+  fixtures were rebuilt from the service's dump and the screenshots (PHONE-CHECKS.md B and E replace
+  them with real dumps).
+- **Debug probes** try one booking step at a time on whatever Outlook screen is showing, from adb,
+  for the phone checks; logged dumps no longer blank the booking screens.
+- **Navigation.** A cold start, or coming back after 15 minutes away, opens the launcher; after an
+  Outlook run the app returns to that run's screen (QUESTIONS.md Q14).
