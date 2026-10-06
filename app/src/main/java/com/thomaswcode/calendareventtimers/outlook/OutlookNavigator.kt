@@ -3,10 +3,13 @@ package com.thomaswcode.calendareventtimers.outlook
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent
 import android.os.SystemClock
+import com.thomaswcode.calendareventtimers.calendar.Attendee
+import com.thomaswcode.calendareventtimers.calendar.CalEvent
 import com.thomaswcode.calendareventtimers.domain.EventParser
 import com.thomaswcode.calendareventtimers.domain.ScannedEvent
 import com.thomaswcode.calendareventtimers.domain.TriggerTime
 import com.thomaswcode.calendareventtimers.domain.cleanUiText
+import com.thomaswcode.calendareventtimers.engine.LabelTarget
 import com.thomaswcode.calendareventtimers.outlook.CalendarReader.EventBlock
 import com.thomaswcode.calendareventtimers.outlook.CalendarReader.StripDay
 import com.thomaswcode.calendareventtimers.util.ScanLog
@@ -20,18 +23,29 @@ import kotlinx.coroutines.delay
 /** A scan step that cannot go on; the message is shown to the user. */
 class ScanFailure(message: String) : Exception(message)
 
+/** What reading one event's labels in Outlook gave. */
+sealed interface LabelRead {
+    data class Read(val title: String, val categories: List<String>) : LabelRead
+
+    data class Problem(val message: String) : LabelRead
+}
+
 /**
- * Drives Outlook (PLAN.md §4.3): launch → Calendar tab → Day view → target date → for each timed
- * event starting that day: open it, read the details, close it. Navigation is always explicit,
- * because Outlook remembers the last day and view shown.
+ * Drives Outlook's calendar (PLAN.md §4.3): launch → Calendar tab → Day view → target date →
+ * open events, read their details, close them. Navigation is always explicit, because Outlook
+ * remembers the last day and view shown.
  *
- * Results accumulate in [events] and [problems] as it goes, so a scan that fails part-way can still
- * offer what it read.
+ * Two ways to read: [scan] opens every timed event of a day (the original timers scan, now the
+ * fallback when the calendar provider can't be read); [readLabels] opens only the events whose
+ * labels aren't known yet (PLAN-ROOM-BOOKING.md §3.3).
+ *
+ * [scan]'s results accumulate in [events] and [problems] as it goes, so a scan that fails part-way
+ * can still offer what it read.
  */
 class OutlookNavigator(
     private val service: AccessibilityService,
-    private val driver: UiDriver,
-    private val onProgress: (String) -> Unit,
+    internal val driver: UiDriver,
+    internal val onProgress: (String) -> Unit,
 ) {
     val events = mutableListOf<ScannedEvent>()
     val problems = mutableListOf<String>()
@@ -41,13 +55,68 @@ class OutlookNavigator(
         private set
 
     suspend fun scan(target: LocalDate, hasStarted: (LocalTime) -> Boolean) {
+        openDay(target)
+        readDay(target, hasStarted)
+        ScanLog.i("Scan of ${EventParser.dayLabel(target)} done: ${events.size} read, $startedSkipped already started, ${problems.size} problem(s)")
+    }
+
+    /**
+     * Opens each target event and reads its labels, visiting the days in date order. [expected]
+     * are the provider's events per day, compared with the Day view on every day visited anyway
+     * (only logged: it shows calendars or sync gaps the provider misses). Results go into [out]
+     * as they are read, so a run that stops part-way keeps what it read.
+     */
+    suspend fun readLabels(
+        targets: List<LabelTarget>,
+        expected: Map<LocalDate, List<CalEvent>> = emptyMap(),
+        out: MutableMap<LabelTarget, LabelRead> = LinkedHashMap(),
+    ): Map<LabelTarget, LabelRead> {
+        if (targets.isEmpty()) return out
         launchOutlook()
         openCalendar()
         ensureDayView()
-        goToDate(target)
-        waitForDay(target)
-        readDay(target, hasStarted)
-        ScanLog.i("Scan of ${EventParser.dayLabel(target)} done: ${events.size} read, $startedSkipped already started, ${problems.size} problem(s)")
+        for ((date, dayTargets) in targets.groupBy { it.date }.toSortedMap()) {
+            goToDate(date)
+            waitForDay(date)
+            expected[date]?.let { crossCheck(date, it) }
+            // Events sharing a start and a title look the same in the Day view, so they are read together.
+            val slots = dayTargets.groupBy { it.start to CalEvent.normaliseTitle(it.title) }
+            for (slot in slots.keys.sortedWith(compareBy({ it.first }, { it.second }))) {
+                val group = slots.getValue(slot)
+                onProgress("Reading labels ${out.size + 1} of ${targets.size}: ${group.first().title}")
+                val twins = maxOf(LabelSlots.twins(expected[date], date, slot.first, slot.second) ?: 0, group.size)
+                val read = readSlot(group.first(), twins)
+                group.forEach { out[it] = read }
+            }
+        }
+        val read = out.values.count { it is LabelRead.Read }
+        ScanLog.i("Labels read in Outlook: $read of ${targets.size}")
+        return out
+    }
+
+    // ---- Navigation, also used by BookingNavigator ----
+
+    /** Outlook in front, on its calendar, in Day view, showing [date] with its events loaded. */
+    internal suspend fun openDay(date: LocalDate) {
+        launchOutlook()
+        openCalendar()
+        ensureDayView()
+        goToDate(date)
+        waitForDay(date)
+    }
+
+    /** Back on [date]'s Day view if Outlook has left it (another screen, or another day). */
+    internal suspend fun ensureOnDay(date: LocalDate) {
+        val root = driver.snapshot()
+        val onDay = CalendarReader.isCalendar(root) && !DetailsReader.isDetails(root) &&
+            CalendarReader.selectedDay(root)?.label == EventParser.dayLabel(date)
+        if (onDay) return
+        ScanLog.i("Not on ${EventParser.dayLabel(date)}; going there")
+        if (!driver.outlookInFront()) launchOutlook()
+        if (!CalendarReader.isCalendar(root) || DetailsReader.isDetails(root)) openCalendar()
+        ensureDayView()
+        goToDate(date)
+        waitForDay(date)
     }
 
     private suspend fun launchOutlook() {
@@ -59,7 +128,7 @@ class OutlookNavigator(
         delay(700)
     }
 
-    private suspend fun openCalendar() {
+    internal suspend fun openCalendar() {
         onProgress("Opening the calendar…")
         repeat(6) {
             val root = driver.snapshot()
@@ -179,6 +248,8 @@ class OutlookNavigator(
         ScanLog.i("$label shows ${last.size} event block(s)")
     }
 
+    // ---- The whole-day scan ----
+
     private suspend fun readDay(target: LocalDate, hasStarted: (LocalTime) -> Boolean) {
         val label = EventParser.dayLabel(target)
         val seen = HashSet<String>()
@@ -226,36 +297,12 @@ class OutlookNavigator(
     private suspend fun readEvent(block: EventBlock, target: LocalDate, listedStart: LocalTime, label: String) {
         val name = EventParser.titleFromDesc(block.desc) ?: block.desc.take(40)
         onProgress("Reading event ${events.size + problems.size + 1}: $name")
-        driver.click(block.node, "event '$name'")
-        var opened = driver.waitUntil(5_000) { driver.hasId(OutlookSelectors.DETAILS_TITLE) }
-        if (!opened && driver.outlookInFront() && driver.hasId(OutlookSelectors.VIEW_SWITCHER) && !driver.hasId(OutlookSelectors.DETAILS_TITLE)) {
-            // Still on the calendar: the click didn't take, so tap the block's centre instead, but
-            // only where the block really is on screen (a tap elsewhere could hit Join or a link).
-            val again = CalendarReader.eventBlocks(driver.snapshot())
-                .firstOrNull { EventParser.stableDesc(it.desc) == EventParser.stableDesc(block.desc) }
-            if (again != null && again.node.visible && !again.node.bounds.isEmpty) {
-                driver.tap(again.node.bounds)
-                opened = driver.waitUntil(4_000) { driver.hasId(OutlookSelectors.DETAILS_TITLE) }
-            }
-        }
-        if (!opened) {
+        if (!openEvent(block, name)) {
             problems += "$name: the event didn't open"
-            ScanLog.dump("Event didn't open: $name", driver.snapshot().calendarOnlyDump())
             returnToCalendar()
             return
         }
-
-        var (screen, read) = readSettledDetails(name, EventParser.locationCountInDesc(block.desc))
-        // The category row is at the bottom; scroll down if it isn't in the tree.
-        var scrolls = 0
-        while (!read.categoryRowFound && scrolls++ < 4) {
-            val scrollView = screen.byId(OutlookSelectors.DETAILS_SCROLLVIEW) ?: break
-            if (!driver.scrollVertically(scrollView, down = true)) break
-            delay(400)
-            screen = driver.snapshot()
-            read = read.merge(DetailsReader.read(screen))
-        }
-        if (!read.categoryRowFound) ScanLog.dump("No category row: $name", screen.calendarOnlyDump())
+        val read = readOpenedDetails(name, EventParser.locationCountInDesc(block.desc))
         closeDetails()
 
         // The screen that opened must be this block's event, not one left open or opened by a stray tap.
@@ -276,6 +323,135 @@ class OutlookNavigator(
                 ScanLog.i("Read '$title' at ${TriggerTime.formatHhMm(start)}, categories ${read.categories}, location $location")
             }
         }
+    }
+
+    // ---- Reading the labels of one slot: a day, a start and a title ----
+
+    /**
+     * Opens every block of [t]'s slot that mentions its title (normally one) and keeps those that
+     * open as exactly this event. When the calendar has [twins] such events, nothing on the Day
+     * view says which block is which, so [LabelSlots.decide] only gives labels all of them share.
+     */
+    private suspend fun readSlot(t: LabelTarget, twins: Int): LabelRead {
+        val time = TriggerTime.formatHhMm(t.start)
+        ensureOnDay(t.date)
+        val count = min(findBlocks(t.date, t.start, t.title).size, MAX_SLOT_BLOCKS)
+        val exact = ArrayList<LabelRead.Read>()
+        val unreadable = ArrayList<String>()
+        var other: String? = null
+        for (i in 0 until count) {
+            if (i > 0) ensureOnDay(t.date)
+            val block = findBlocks(t.date, t.start, t.title).getOrNull(i) ?: break
+            when (val r = readBlock(t, block)) {
+                is BlockRead.Exact -> exact += r.read
+                is BlockRead.Other -> if (other == null) other = r.message
+                is BlockRead.Unreadable -> unreadable += r.message
+            }
+        }
+        return LabelSlots.decide(t.title, time, twins, exact, unreadable, other)
+    }
+
+    private sealed interface BlockRead {
+        data class Exact(val read: LabelRead.Read) : BlockRead
+
+        /** Another event: its description mentions the title too. */
+        data class Other(val message: String) : BlockRead
+
+        /** Couldn't be read, so it may or may not be the event. */
+        data class Unreadable(val message: String) : BlockRead
+    }
+
+    private suspend fun readBlock(t: LabelTarget, block: EventBlock): BlockRead {
+        val time = TriggerTime.formatHhMm(t.start)
+        if (!openEvent(block, t.title)) {
+            returnToCalendar()
+            return BlockRead.Unreadable("${t.title} ($time): the event didn't open")
+        }
+        val read = readOpenedDetails(t.title, EventParser.locationCountInDesc(block.desc))
+        closeDetails()
+        val title = read.title
+        return when {
+            title == null -> BlockRead.Unreadable("${t.title} ($time): couldn't read its title")
+            read.date != null && read.date != t.date -> BlockRead.Other("${t.title}: its details say ${read.dateText}")
+            read.start != null && read.start != t.start -> BlockRead.Other("${t.title}: the event that opened starts at ${read.start}, not $time")
+            CalEvent.normaliseTitle(title) != CalEvent.normaliseTitle(t.title) ->
+                BlockRead.Other("${t.title} ($time): the event that opened was '$title'")
+            !read.categoryRowFound -> BlockRead.Unreadable("${t.title} ($time): couldn't find its categories")
+            else -> BlockRead.Exact(LabelRead.Read(title, read.categories)).also {
+                ScanLog.i("Labels of '$title' ($time): ${read.categories}")
+            }
+        }
+    }
+
+    /**
+     * Every block on [date] starting at [start] whose description mentions [title], left to right.
+     * "Mentions" is a substring test (titles can contain commas), so callers must check the details
+     * that open. The service normally sees the whole day; scrolling through the grid is the fallback.
+     */
+    internal suspend fun findBlocks(date: LocalDate, start: LocalTime, title: String): List<EventBlock> {
+        fun matching(root: UiNode) = CalendarReader.eventBlocks(root)
+            .filter { EventParser.startTimeIfStartsOn(it.desc, date) == start && EventParser.descMentions(it.desc, title) }
+            .sortedBy { it.node.bounds.left }
+        matching(driver.snapshot()).let { if (it.isNotEmpty()) return it }
+        scrollToTop()
+        repeat(12) {
+            matching(driver.snapshot()).let { if (it.isNotEmpty()) return it }
+            if (!scrollGrid(down = true)) return emptyList()
+        }
+        return emptyList()
+    }
+
+    /** Logs differences between the Day view's timed events and the provider's for [date]. */
+    private fun crossCheck(date: LocalDate, expected: List<CalEvent>) {
+        val blocks = CalendarReader.eventBlocks(driver.snapshot())
+            .mapNotNull { b -> EventParser.startTimeIfStartsOn(b.desc, date)?.let { it to b.desc } }
+        val timed = expected.filter { !it.allDay && it.date == date }
+        val notInOutlook = timed.filter { e -> blocks.none { (s, d) -> s == e.start && EventParser.descMentions(d, e.title) } }
+        val notInProvider = blocks.filter { (s, d) -> timed.none { e -> s == e.start && EventParser.descMentions(d, e.title) } }
+        if (notInOutlook.isEmpty() && notInProvider.isEmpty()) {
+            ScanLog.i("${EventParser.dayLabel(date)}: the Day view and the phone's calendar agree (${timed.size} events)")
+        } else {
+            ScanLog.w(
+                "${EventParser.dayLabel(date)}: not in the Day view: ${notInOutlook.joinToString { "${it.start} ${it.title}" }.ifEmpty { "-" }}; " +
+                    "only in the Day view: ${notInProvider.joinToString { (s, d) -> "$s ${EventParser.titleFromDesc(d) ?: d.take(30)}" }.ifEmpty { "-" }}",
+            )
+        }
+    }
+
+    // ---- Opening and reading an event's details ----
+
+    /** Opens [block]'s details; false if they didn't open (the screen may be anywhere then). */
+    internal suspend fun openEvent(block: EventBlock, name: String): Boolean {
+        driver.click(block.node, "event '$name'")
+        var opened = driver.waitUntil(5_000) { driver.hasId(OutlookSelectors.DETAILS_TITLE) }
+        if (!opened && driver.outlookInFront() && driver.hasId(OutlookSelectors.VIEW_SWITCHER) && !driver.hasId(OutlookSelectors.DETAILS_TITLE)) {
+            // Still on the calendar: the click didn't take, so tap the block's centre instead, but
+            // only where the block really is on screen (a tap elsewhere could hit Join or a link).
+            val again = CalendarReader.eventBlocks(driver.snapshot())
+                .firstOrNull { EventParser.stableDesc(it.desc) == EventParser.stableDesc(block.desc) }
+            if (again != null && again.node.visible && !again.node.bounds.isEmpty) {
+                driver.tap(again.node.bounds)
+                opened = driver.waitUntil(4_000) { driver.hasId(OutlookSelectors.DETAILS_TITLE) }
+            }
+        }
+        if (!opened) ScanLog.dump("Event didn't open: $name", driver.snapshot().calendarOnlyDump())
+        return opened
+    }
+
+    /** Reads the open details screen once it has settled, scrolling down for the category row. */
+    internal suspend fun readOpenedDetails(name: String, expectedLocations: Int): DetailsRead {
+        var (screen, read) = readSettledDetails(name, expectedLocations)
+        // The category row is at the bottom; scroll down if it isn't in the tree.
+        var scrolls = 0
+        while (!read.categoryRowFound && scrolls++ < 4) {
+            val scrollView = screen.byId(OutlookSelectors.DETAILS_SCROLLVIEW) ?: break
+            if (!driver.scrollVertically(scrollView, down = true)) break
+            delay(400)
+            screen = driver.snapshot()
+            read = read.merge(DetailsReader.read(screen))
+        }
+        if (!read.categoryRowFound) ScanLog.dump("No category row: $name", screen.calendarOnlyDump())
+        return read
     }
 
     /**
@@ -316,7 +492,7 @@ class OutlookNavigator(
         return screen to read
     }
 
-    private suspend fun closeDetails() {
+    internal suspend fun closeDetails() {
         val close = CalendarReader.closeButton(driver.snapshot())
         if (close != null) driver.click(close, "Close") else driver.back()
         val back = driver.waitUntil(4_000) {
@@ -325,7 +501,7 @@ class OutlookNavigator(
         if (!back) returnToCalendar()
     }
 
-    private suspend fun returnToCalendar() {
+    internal suspend fun returnToCalendar() {
         repeat(3) {
             val root = driver.snapshot()
             if (CalendarReader.isCalendar(root) && !DetailsReader.isDetails(root)) return
@@ -367,7 +543,7 @@ class OutlookNavigator(
 
     private fun signature(root: UiNode) = CalendarReader.eventBlocks(root).map { "${it.desc}@${it.node.bounds}" }.sorted()
 
-    private fun fail(message: String): Nothing {
+    internal fun fail(message: String): Nothing {
         runCatching { ScanLog.dump(message, driver.snapshot().calendarOnlyDump()) }
         throw ScanFailure(message)
     }
@@ -380,5 +556,46 @@ class OutlookNavigator(
         const val SETTLE_MIN_MS = 700L
         const val SETTLE_QUIET_MS = 350L
         const val SETTLE_MAX_MS = 4_000L
+
+        /** Blocks opened at most for one slot (a title that is part of other titles at the same time). */
+        const val MAX_SLOT_BLOCKS = 6
+    }
+}
+
+/**
+ * Events that share a day, a start and a title ("twins") look the same in Outlook's Day view: its
+ * blocks give no way to tell which is which. So their labels are read from every block that may
+ * be one of them, and count only if those all agree; otherwise none is remembered rather than
+ * one event getting another's labels.
+ */
+internal object LabelSlots {
+    /** How many events the Day view may show for this slot: timed, live and not declined; null: unknown. */
+    fun twins(expected: List<CalEvent>?, date: LocalDate, start: LocalTime, normalisedTitle: String): Int? =
+        expected?.count {
+            it.date == date && !it.allDay && it.start == start && !it.cancelled &&
+                it.selfStatus != Attendee.STATUS_DECLINED && CalEvent.normaliseTitle(it.title) == normalisedTitle
+        }
+
+    /**
+     * The slot's labels from the blocks that opened as exactly [title] ([exact]), with the messages
+     * of blocks that couldn't be read ([unreadable]) and of one that was another event ([other]).
+     */
+    fun decide(title: String, time: String, twins: Int, exact: List<LabelRead.Read>, unreadable: List<String>, other: String?): LabelRead {
+        if (exact.isEmpty()) return LabelRead.Problem(unreadable.firstOrNull() ?: other ?: "$title ($time): not found in Outlook's Day view")
+        val sets = exact.map { r -> r.categories.map { it.trim().lowercase() }.toSet() }.distinct()
+        return when {
+            sets.size > 1 -> LabelRead.Problem(
+                "$title ($time): ${exact.size} events have this title and time but different labels, and Outlook doesn't show which is which",
+            )
+            twins > 1 && exact.size < twins -> LabelRead.Problem(
+                "$title ($time): $twins events have this title and time, and only ${exact.size} could be read in Outlook",
+            )
+            // A block that couldn't be read may be this very event (the one read being another
+            // calendar's copy, say), so the labels read can't be said to be its.
+            unreadable.isNotEmpty() -> LabelRead.Problem(
+                "$title ($time): another event at this time couldn't be read in Outlook (${unreadable.first()}), so whose labels these are isn't certain",
+            )
+            else -> exact.first()
+        }
     }
 }

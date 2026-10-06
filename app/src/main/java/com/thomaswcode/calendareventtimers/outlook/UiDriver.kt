@@ -4,6 +4,8 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 import android.graphics.Rect
+import android.os.Build
+import android.os.Bundle
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
@@ -28,6 +30,10 @@ class LiveNode(
     override val bounds: Box,
     override val children: List<LiveNode>,
     override val visible: Boolean = true,
+    override val checkable: Boolean = false,
+    override val checked: Boolean = false,
+    override val focused: Boolean = false,
+    override val editable: Boolean = false,
 ) : UiNode {
     companion object {
         private const val MAX_DEPTH = 60
@@ -48,11 +54,24 @@ class LiveNode(
                 bounds = Box(r.left, r.top, r.right, r.bottom),
                 children = kids,
                 visible = info.isVisibleToUser,
+                checkable = info.isCheckable,
+                checked = isChecked(info),
+                focused = info.isFocused,
+                editable = info.isEditable,
             )
         }
 
         fun root(windows: List<LiveNode>) =
             LiveNode(null, null, null, null, null, false, false, false, Box(0, 0, 0, 0), windows)
+
+        /** Android 16 made "checked" three-state; before it, a boolean. */
+        private fun isChecked(info: AccessibilityNodeInfo): Boolean =
+            if (Build.VERSION.SDK_INT >= 36) {
+                info.checked == AccessibilityNodeInfo.CHECKED_STATE_TRUE
+            } else {
+                @Suppress("DEPRECATION")
+                info.isChecked
+            }
     }
 }
 
@@ -163,6 +182,37 @@ class UiDriver(private val service: AccessibilityService) {
     suspend fun back() {
         service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
         delay(600)
+    }
+
+    /** Replaces a text field's text (ACTION_SET_TEXT). */
+    fun setText(node: UiNode, text: String): Boolean {
+        val info = (node as? LiveNode)?.info ?: return false
+        val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
+        return runCatching { info.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args) }.getOrDefault(false)
+            .also { ScanLog.i("Set text of ${node.shortClass} (${text.length} chars): $it") }
+    }
+
+    /** Pastes the clipboard into a text field (ACTION_PASTE). */
+    fun paste(node: UiNode): Boolean {
+        val info = (node as? LiveNode)?.info ?: return false
+        return runCatching { info.performAction(AccessibilityNodeInfo.ACTION_PASTE) }.getOrDefault(false)
+            .also { ScanLog.i("Paste into ${node.shortClass}: $it") }
+    }
+
+    /** Input focus on a node (a text field, or an editor inside a WebView). */
+    fun focus(node: UiNode): Boolean {
+        val info = (node as? LiveNode)?.info ?: return false
+        return runCatching { info.performAction(AccessibilityNodeInfo.ACTION_FOCUS) }.getOrDefault(false)
+    }
+
+    /**
+     * The generic forward/backward scroll: one value on a NumberPicker wheel, a page of a
+     * RecyclerView. (Not for the Day view, where it would change the day; see [scrollVertically].)
+     */
+    fun scroll(node: UiNode, forward: Boolean): Boolean {
+        val info = (node as? LiveNode)?.info ?: return false
+        val action = if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+        return runCatching { info.performAction(action) }.getOrDefault(false)
     }
 
     private suspend fun dispatch(gesture: GestureDescription): Boolean = suspendCancellableCoroutine { cont ->

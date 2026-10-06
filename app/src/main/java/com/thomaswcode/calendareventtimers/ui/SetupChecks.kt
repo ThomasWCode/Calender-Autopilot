@@ -13,11 +13,12 @@ import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.thomaswcode.calendareventtimers.alarm.AlarmScheduler
 import com.thomaswcode.calendareventtimers.alarm.Notifications
+import com.thomaswcode.calendareventtimers.calendar.CalendarStore
 import com.thomaswcode.calendareventtimers.outlook.OutlookReaderService
 import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors
 import com.thomaswcode.calendareventtimers.util.ScanLog
 
-enum class SetupAction { ACCESSIBILITY, APP_INFO, NOTIFICATIONS, FULL_SCREEN, EXACT_ALARMS, SOUND }
+enum class SetupAction { ACCESSIBILITY, APP_INFO, NOTIFICATIONS, CALENDAR, FULL_SCREEN, EXACT_ALARMS, SOUND }
 
 data class SetupItem(
     val title: String,
@@ -34,6 +35,7 @@ object SetupChecks {
         val outlook = context.packageManager.getLaunchIntentForPackage(OutlookSelectors.PACKAGE) != null
         val readerOn = accessibilityEnabled(context)
         val notifications = Notifications.canPost(context)
+        val calendar = CalendarStore.hasAccess(context)
         val fullScreen = Build.VERSION.SDK_INT < 34 || context.getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
         val exact = AlarmScheduler(context).canScheduleExact()
         val volume = context.getSystemService(AudioManager::class.java).getStreamVolume(AudioManager.STREAM_ALARM)
@@ -60,6 +62,17 @@ object SetupChecks {
                 if (notifications) "Allowed." else "Needed to show a ringing alarm.",
                 notifications, required = true,
                 actions = listOf("Allow" to SetupAction.NOTIFICATIONS),
+            ),
+            SetupItem(
+                "Calendar access (read only)",
+                if (calendar) {
+                    "Allowed. Events, invitees and room replies come from the phone's calendar, so Outlook is opened less."
+                } else {
+                    "Lets the app read the events Outlook keeps in the phone's calendar, so it opens Outlook only to read " +
+                        "labels it hasn't seen and to book rooms. Needed for room booking. Nothing is changed through it."
+                },
+                calendar, required = true,
+                actions = listOf("Allow" to SetupAction.CALENDAR),
             ),
             SetupItem(
                 "Full-screen alarms",
@@ -100,6 +113,8 @@ object SetupChecks {
             SetupAction.NOTIFICATIONS -> listOf(
                 Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName),
             )
+            // Asked for in the app; once refused, Android's App info → Permissions is the way.
+            SetupAction.CALENDAR -> emptyList()
             // Android 13 has no such page (nor the restriction); app info is the fallback below.
             SetupAction.FULL_SCREEN ->
                 if (Build.VERSION.SDK_INT >= 34) listOf(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, pkg)) else emptyList()
