@@ -587,8 +587,13 @@ internal object LabelSlots {
             sets.size > 1 -> LabelRead.Problem(
                 "$title ($time): ${exact.size} events have this title and time but different labels, and Outlook doesn't show which is which",
             )
-            twins > 1 && (exact.size < twins || unreadable.isNotEmpty()) -> LabelRead.Problem(
+            twins > 1 && exact.size < twins -> LabelRead.Problem(
                 "$title ($time): $twins events have this title and time, and only ${exact.size} could be read in Outlook",
+            )
+            // A block that couldn't be read may be this very event (the one read being another
+            // calendar's copy, say), so the labels read can't be said to be its.
+            unreadable.isNotEmpty() -> LabelRead.Problem(
+                "$title ($time): another event at this time couldn't be read in Outlook (${unreadable.first()}), so whose labels these are isn't certain",
             )
             else -> exact.first()
         }

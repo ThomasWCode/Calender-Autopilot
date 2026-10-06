@@ -55,8 +55,9 @@ class LabelSlotsTest {
     @Test
     fun oneEventIsReadAsBefore() {
         assertEquals(read("Moveable"), LabelSlots.decide("Team call", "09:00", 1, listOf(read("Moveable")), emptyList(), null))
-        // Another block mentioning the title couldn't be read: one event in the calendar, so it is this one.
-        assertEquals(read("Moveable"), LabelSlots.decide("Team call", "09:00", 1, listOf(read("Moveable")), listOf("didn't open"), null))
+        // Another block mentioning the title couldn't be read: it may be this event (the one read being
+        // another calendar's copy), so nothing is certain (Codex's seventh review).
+        assertTrue(LabelSlots.decide("Team call", "09:00", 1, listOf(read("Moveable")), listOf("didn't open"), null) is LabelRead.Problem)
     }
 
     @Test

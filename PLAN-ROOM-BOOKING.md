@@ -730,6 +730,12 @@ bookings). Where it differs from, or adds to, the sections above:
   people told are read from the booking event (changed in Outlook, the record follows); a booking
   found only in the calendar that was just changed is marked as waiting for Outlook to sync, can't
   be changed again meanwhile, and the screen looks again every 5 s for 2 minutes.
+- **Seventh round (Codex, 2026-10-06).** A "maybe saved" booking is recorded even when Outlook can't
+  be brought back afterwards (the run then stops); a block at the same time that can't be read
+  leaves the labels uncertain (it may be the event itself); every change in Manage bookings gets
+  the 2-minute sync hold: edited people aren't overwritten by the calendar's old list, and a
+  deleted booking isn't shown again as found in the calendar; the relabelled warning uses only
+  labels still valid for the meeting as it is now.
 - **The screen stays upright** during every Outlook run (the user's request, 2026-10-06): the STOP
   strip asks for portrait, which Android honours for any visible window, as if auto-rotate were off.
   Nothing to restore: the hold goes with the strip, even if the app crashes. If the run starts
