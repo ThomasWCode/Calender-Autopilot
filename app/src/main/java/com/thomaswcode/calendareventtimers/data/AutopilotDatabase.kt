@@ -34,8 +34,11 @@ data class LabelCacheEntity(
 
 enum class BookingState { SAVED, DELETED }
 
-/** The room's reply to a booking, from the calendar provider. */
-enum class RoomReply { WAITING, RESERVED, TENTATIVE, DECLINED, NOT_FOUND }
+/**
+ * The room's reply to a booking, from the calendar provider. NOT_FOUND: the booking event is gone;
+ * NO_ROOM: it is there but has no room any more (taken off in Outlook). Neither holds a room.
+ */
+enum class RoomReply { WAITING, RESERVED, TENTATIVE, DECLINED, NOT_FOUND, NO_ROOM }
 
 /** A room-booking event the app saved in Outlook. Dates and times are ISO strings, like the alarms'. */
 @Entity(tableName = "bookings", indices = [Index("occurrenceKey"), Index("eventDate")])
@@ -61,6 +64,7 @@ data class BookingEntity(
     /** The booking event's own `_sync_id`, once found in the provider. */
     val bookingSyncId: String?,
     val createdAt: Long,
+    /** When the room's reply last changed, or the room was changed. */
     val checkedAt: Long?,
 )
 
@@ -152,8 +156,8 @@ interface BookingDao {
     @Query("UPDATE bookings SET roomReply = :reply, bookingSyncId = COALESCE(:syncId, bookingSyncId), checkedAt = :at WHERE id = :id")
     suspend fun setReply(id: Long, reply: RoomReply, syncId: String?, at: Long)
 
-    @Query("UPDATE bookings SET room = :room, roomReply = 'WAITING', checkedAt = NULL WHERE id = :id")
-    suspend fun setRoom(id: Long, room: String)
+    @Query("UPDATE bookings SET room = :room, roomReply = 'WAITING', checkedAt = :at WHERE id = :id")
+    suspend fun setRoom(id: Long, room: String, at: Long)
 
     @Query("UPDATE bookings SET notified = :notified WHERE id = :id")
     suspend fun setNotified(id: Long, notified: String)

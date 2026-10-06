@@ -98,6 +98,7 @@ object ManageController {
         when (b.roomReply) {
             RoomReply.DECLINED -> out += "The room declined: change the room, or delete the booking."
             RoomReply.NOT_FOUND -> out += "The booking isn't in your calendar any more (deleted in Outlook?)."
+            RoomReply.NO_ROOM -> out += "The booking has no room any more (taken off in Outlook?): change the room, or delete the booking."
             else -> Unit
         }
         if (!canCheck) return out

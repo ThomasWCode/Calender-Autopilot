@@ -31,12 +31,23 @@ data class BookingCandidate(
     val partial: PartialCover?,
     /** The room declined the app's booking for it. */
     val roomDeclined: Boolean,
+    /** The app's booking for it has no room any more (taken off in Outlook). */
+    val roomRemoved: Boolean = false,
 ) {
     val key: String get() = event.occurrenceKey
 
     /** Who will be told with [answers]. */
     fun notifyList(answers: Answers): List<Person> =
         if (!answers.bookRoom || !answers.notify) emptyList() else people.filter { it.email !in answers.removed }
+}
+
+/** What the calendar says about a candidate just before it is booked ([BookingPlanner.recheck]). */
+sealed interface Recheck {
+    /** Still the event that was answered: book [event], telling [people]; [notes] say what changed. */
+    data class Go(val event: CalEvent, val people: List<String>, val notes: List<String>) : Recheck
+
+    /** It changed after the wizard was answered, so it isn't booked; [reason] says how. */
+    data class Skip(val reason: String) : Recheck
 }
 
 /**
@@ -107,10 +118,11 @@ object BookingPlanner {
             val previous = input.answers[e.occurrenceKey]
             val memory = input.memory[e.seriesKey]
             val declined = known?.reply == RoomReply.DECLINED
+            val removed = known?.reply == RoomReply.NO_ROOM
             val people = People.toNotify(attendees, e.organizer, input.myAddresses, input.rooms)
             val defaults = when {
                 previous == AnswerKind.NO_ROOM_WANTED -> Answers(bookRoom = false, notify = memory?.notify ?: false, removed = memory?.removed.orEmpty())
-                memory != null -> Answers(memory.bookRoom || declined, memory.notify, memory.removed)
+                memory != null -> Answers(memory.bookRoom || declined || removed, memory.notify, memory.removed)
                 else -> Answers(bookRoom = true, notify = false)
             }
             val candidate = BookingCandidate(
@@ -122,10 +134,45 @@ object BookingPlanner {
                 previous = previous,
                 partial = RoomCover.partial(e, input.events, attendeesOf, input.rooms, input.zone, mine),
                 roomDeclined = declined,
+                roomRemoved = removed,
             )
             if (previous == AnswerKind.NO_ROOM_WANTED) answeredBefore += candidate else toAsk += candidate
         }
         return Output(toAsk, answeredBefore, covered, unlabelled, unknown)
+    }
+
+    /**
+     * [c] against the calendar as it is now, just before booking it: the wizard may have been
+     * answered long before Book Rooms. [events] are the occurrences of its day, [attendees] by event
+     * row. A room is booked only for the event as answered: not moved, renamed, cancelled, declined,
+     * started or given a room of its own since. People who are no longer invitees aren't told.
+     * Other events aren't looked at again: a booking made earlier in the same run would count.
+     */
+    fun recheck(
+        c: BookingCandidate, answers: Answers, events: List<CalEvent>, attendees: Map<Long, List<Attendee>>,
+        known: KnownBooking?, rooms: List<String>, myAddresses: Set<String>, now: Instant,
+    ): Recheck {
+        val e = events.firstOrNull { it.occurrenceKey == c.key }
+            ?: events.firstOrNull { it.eventId == c.event.eventId && it.begin == c.event.begin }
+            ?: return Recheck.Skip("it was moved, changed or deleted after you answered")
+        val title = CalEvent.normaliseTitle(e.title)
+        when {
+            e.cancelled -> return Recheck.Skip("it has been cancelled")
+            e.selfStatus == Attendee.STATUS_DECLINED -> return Recheck.Skip("you have declined it")
+            !e.begin.isAfter(now) -> return Recheck.Skip("it has started")
+            e.end != c.event.end || e.allDay != c.event.allDay -> return Recheck.Skip("its time has changed")
+            title != CalEvent.normaliseTitle(c.event.title) -> return Recheck.Skip("it has been renamed “${e.title.trim()}”")
+        }
+        val own = attendees[e.eventId].orEmpty()
+        val mine = myAddresses.map { it.trim().lowercase() }.toSet()
+        RoomCover.cover(e, own, known, emptyList(), { emptyList() }, rooms, mine)?.let { cover ->
+            return Recheck.Skip("it has a room now${cover.room?.let { r -> " ($r)" }.orEmpty()}")
+        }
+        val planned = c.notifyList(answers).map { it.email }
+        val invited = People.toNotify(own, e.organizer, myAddresses, rooms).map { it.email }.toSet()
+        val gone = planned.filter { it !in invited }
+        val notes = if (gone.isEmpty()) emptyList() else listOf("not told, as no longer invited: ${gone.joinToString()}")
+        return Recheck.Go(e, planned.filter { it in invited }, notes)
     }
 
     /** Rough time Outlook will be on screen for [bookings], in seconds (§3.17). */

@@ -42,6 +42,7 @@ Git Bash rewrites `/sdcard/...` paths: set `MSYS_NO_PATHCONV=1` for `adb shell` 
 | A6 | Today's scan after some events have started | Started ones skipped, count shown |
 | A7 | Calendar access refused (App info → Permissions → deny), scan | Falls back to the old whole-day scan; works as before |
 | A8 | Time for A2 / A3 | Seconds with Outlook on screen |
+| A9 | Two **test events** (no invitees, deleted after) with the same title and start on one day: one Moveable, the other no label; scan | Both blocks opened; problem `…different labels, and Outlook doesn't show which is which`; nothing remembered for them. Then both Moveable: both read, one label. Note how Outlook orders the two blocks |
 
 ## B. Probes on Outlook's form (nothing saved)
 
@@ -89,6 +90,7 @@ Room booking ⋮ → **Dry run** on. Each booking is filled in completely, room 
 | C5 | An event at a time when every listed room is busy | *No room in your list was free*; nothing left in Outlook |
 | C6 | The app comes back to the results after the run; Back → Room booking | — |
 | C7 | Recent shortcut off (Settings) vs on | Same room chosen; time saved |
+| C8 | Answer the wizard for a **test event**, then move it in Outlook before *Book Rooms* | Results: *Not done: it was moved, changed or deleted after you answered*; no form opened for it |
 
 Only after C1–C7 pass: a dry run with **Notify = Yes** (the people's addresses are typed into the
 draft, which is discarded; nothing is sent). Confirm it stays a draft (C2).
@@ -103,6 +105,7 @@ draft, which is discarded; nothing is sent). Confirm it stays a draft (C2).
 | D4 | Manage bookings → Delete booking | Prompt text and buttons with a room on the event (`DELETE_CONFIRMATIONS` lists the labels accepted); the room's cancellation; booking marked deleted |
 | D5 | Edit people (needs a consenting colleague) | Adding works by typing; **removing** a person: what tapping a chip offers (`removePerson` looks for Remove/Delete) |
 | D6 | Notify one consenting colleague | They receive `Room Booking - …` with the room; their reply doesn't disturb the app |
+| D7 | Take the room off a booking in Outlook (D1's, before deleting it) | 15 minutes after the change: Manage bookings says *No room on it* with a warning, and the event is offered again |
 
 ## E. Data to collect for the tests
 

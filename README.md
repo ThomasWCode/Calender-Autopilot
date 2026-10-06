@@ -90,11 +90,13 @@ Alarm labels read `Title (Label) @ Location`, with meeting links shortened: `Kri
   Rooms** books them in one go: for each, a new Outlook event with the same time (set on Outlook's
   *Choose Time* wheels), the first free room of your list (Location → *Or browse with Room Finder* →
   KS-Rooms), the title `Room Booking - …`, the people, the same description and no alert. Each form
-  is read back before it is saved; a failed step, or STOP, discards it.
+  is read back before it is saved; a failed step, or STOP, discards it. Just before each booking the
+  event is checked in the phone's calendar again: one moved, renamed, cancelled or given a room since
+  you answered isn't booked (run again), and people no longer invited aren't told.
 - The **results** say what each event got: booked (with the room's reply as it arrives: *Reserved*,
   *Declined*…), no free room, failed. Rooms not in Room Finder are named.
-- **⋮ → Manage bookings**: your bookings from today on, with warnings (room declined, event moved or
-  gone); per booking *Change room*, *Edit people*, *Delete booking* (Outlook sends the cancellations;
+- **⋮ → Manage bookings**: your bookings from today on, with warnings (room declined or taken off,
+  event moved or gone); per booking *Change room*, *Edit people*, *Delete booking* (Outlook sends the cancellations;
   nothing about the deletion is remembered, so the event is offered again next time).
 - **⋮ → Dry run**: every booking is filled in in Outlook, room included, then discarded.
 - **Settings**: the rooms, in order (add, remove, reorder, reset to the 25 KS rooms); Room Finder's

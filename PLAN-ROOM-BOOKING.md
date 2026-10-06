@@ -257,14 +257,14 @@ Checked from the provider, so free of screen time. In order:
    doesn't know, e.g. after a reinstall). Its room's reply gives Reserved / Waiting / **Declined**.
 2. **A room on the event itself**: a type-3 attendee, or an attendee whose name or address matches
    a room in the list, that hasn't declined (`… [room added]`, a colleague's meeting in KS-103D).
-   Also when the location names a room in the list but no room is an attendee ("Location says
-   KS-103D", unconfirmed).
+   Also when the location names a room in the list that isn't an attendee ("Location says
+   KS-103D", unconfirmed); a room that declined stays in the location, so it doesn't count there.
 3. **Another of the user's events** covering the whole time with an **accepted** room (`call` with
    KS-121, `Room booking for …`). Partial cover is shown as a note only.
 
 Covered → **not shown at all** (the user's decision on 2026-10-05; first planned as shown with
-**Book a room? = No**). Only the log names them. A booking whose room **declined** isn't covered: the
-event is offered again, with Yes.
+**Book a room? = No**). Only the log names them. A booking whose room **declined**, or that no
+longer has a room, isn't covered: the event is offered again, with Yes.
 
 ### 3.6 People to notify
 
@@ -662,7 +662,17 @@ bookings). Where it differs from, or adds to, the sections above:
   same change key, the whole cache is dropped and the log says so.
 - **Reply check.** Each booking's room reply (Reserved, Tentative, Declined) is read from the
   provider when the Room booking, results and Manage screens open, and every 5 s for two minutes on
-  the results screen. A booking not found in the calendar 15 minutes after saving is "not found".
+  the results screen. A booking not found in the calendar 15 minutes after saving is "not found";
+  one found without a room 15 minutes after it was made or its room changed is "no room" (taken off
+  in Outlook), which doesn't hold the event's room.
+- **Codex review fixes (2026-10-06).** Events sharing a day, a start and a title look the same in
+  the Day view, so their labels are read from every block that may be one of them and kept only if
+  all agree (never one event's labels for another). Rooms are matched by whole name, so KS-103
+  never passes for KS-103D when Manage bookings picks the event to change or delete. Just before
+  each booking, the event is checked in the provider again: one moved, renamed, cancelled, declined,
+  started or given a room since the wizard isn't booked ("not done", run again), and people no
+  longer invited aren't told. A form that can't be left without saving fails its booking instead of
+  being reported as discarded.
 - **Code review fixes (2026-10-05).** STOP no longer leaves Outlook marked busy; Change room leaves
   the booking's own room out; Change room, Edit people and Delete open each candidate event and act
   only on the one with the exact title, start and recorded room; once Save is pressed it runs to the

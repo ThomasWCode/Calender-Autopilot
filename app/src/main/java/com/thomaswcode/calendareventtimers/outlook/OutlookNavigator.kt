@@ -3,6 +3,7 @@ package com.thomaswcode.calendareventtimers.outlook
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent
 import android.os.SystemClock
+import com.thomaswcode.calendareventtimers.calendar.Attendee
 import com.thomaswcode.calendareventtimers.calendar.CalEvent
 import com.thomaswcode.calendareventtimers.domain.EventParser
 import com.thomaswcode.calendareventtimers.domain.ScannedEvent
@@ -78,12 +79,14 @@ class OutlookNavigator(
             goToDate(date)
             waitForDay(date)
             expected[date]?.let { crossCheck(date, it) }
-            // Duplicates (same title and start) are read from successive matching blocks.
-            val seen = HashMap<Pair<LocalTime, String>, Int>()
-            for (t in dayTargets.sortedWith(compareBy({ it.start }, { it.title }))) {
-                onProgress("Reading labels ${out.size + 1} of ${targets.size}: ${t.title}")
-                val nth = seen.merge(t.start to CalEvent.normaliseTitle(t.title), 1, Int::plus)!! - 1
-                out[t] = readTarget(t, nth)
+            // Events sharing a start and a title look the same in the Day view, so they are read together.
+            val slots = dayTargets.groupBy { it.start to CalEvent.normaliseTitle(it.title) }
+            for (slot in slots.keys.sortedWith(compareBy({ it.first }, { it.second }))) {
+                val group = slots.getValue(slot)
+                onProgress("Reading labels ${out.size + 1} of ${targets.size}: ${group.first().title}")
+                val twins = maxOf(LabelSlots.twins(expected[date], date, slot.first, slot.second) ?: 0, group.size)
+                val read = readSlot(group.first(), twins)
+                group.forEach { out[it] = read }
             }
         }
         val read = out.values.count { it is LabelRead.Read }
@@ -322,44 +325,68 @@ class OutlookNavigator(
         }
     }
 
-    // ---- Reading one target's labels ----
+    // ---- Reading the labels of one slot: a day, a start and a title ----
 
-    private suspend fun readTarget(t: LabelTarget, nth: Int): LabelRead {
+    /**
+     * Opens every block of [t]'s slot that mentions its title (normally one) and keeps those that
+     * open as exactly this event. When the calendar has [twins] such events, nothing on the Day
+     * view says which block is which, so [LabelSlots.decide] only gives labels all of them share.
+     */
+    private suspend fun readSlot(t: LabelTarget, twins: Int): LabelRead {
         val time = TriggerTime.formatHhMm(t.start)
         ensureOnDay(t.date)
-        val block = findBlock(t.date, t.start, t.title, nth)
-            ?: return LabelRead.Problem("${t.title} ($time): not found in Outlook's Day view")
+        val count = min(findBlocks(t.date, t.start, t.title).size, MAX_SLOT_BLOCKS)
+        val exact = ArrayList<LabelRead.Read>()
+        val unreadable = ArrayList<String>()
+        var other: String? = null
+        for (i in 0 until count) {
+            if (i > 0) ensureOnDay(t.date)
+            val block = findBlocks(t.date, t.start, t.title).getOrNull(i) ?: break
+            when (val r = readBlock(t, block)) {
+                is BlockRead.Exact -> exact += r.read
+                is BlockRead.Other -> if (other == null) other = r.message
+                is BlockRead.Unreadable -> unreadable += r.message
+            }
+        }
+        return LabelSlots.decide(t.title, time, twins, exact, unreadable, other)
+    }
+
+    private sealed interface BlockRead {
+        data class Exact(val read: LabelRead.Read) : BlockRead
+
+        /** Another event: its description mentions the title too. */
+        data class Other(val message: String) : BlockRead
+
+        /** Couldn't be read, so it may or may not be the event. */
+        data class Unreadable(val message: String) : BlockRead
+    }
+
+    private suspend fun readBlock(t: LabelTarget, block: EventBlock): BlockRead {
+        val time = TriggerTime.formatHhMm(t.start)
         if (!openEvent(block, t.title)) {
             returnToCalendar()
-            return LabelRead.Problem("${t.title} ($time): the event didn't open")
+            return BlockRead.Unreadable("${t.title} ($time): the event didn't open")
         }
         val read = readOpenedDetails(t.title, EventParser.locationCountInDesc(block.desc))
         closeDetails()
         val title = read.title
         return when {
-            title == null -> LabelRead.Problem("${t.title} ($time): couldn't read its title")
-            read.date != null && read.date != t.date -> LabelRead.Problem("${t.title}: its details say ${read.dateText}")
-            read.start != null && read.start != t.start -> LabelRead.Problem("${t.title}: the event that opened starts at ${read.start}, not $time")
+            title == null -> BlockRead.Unreadable("${t.title} ($time): couldn't read its title")
+            read.date != null && read.date != t.date -> BlockRead.Other("${t.title}: its details say ${read.dateText}")
+            read.start != null && read.start != t.start -> BlockRead.Other("${t.title}: the event that opened starts at ${read.start}, not $time")
             CalEvent.normaliseTitle(title) != CalEvent.normaliseTitle(t.title) ->
-                LabelRead.Problem("${t.title} ($time): the event that opened was '$title'")
-            !read.categoryRowFound -> LabelRead.Problem("${t.title} ($time): couldn't find its categories")
-            else -> LabelRead.Read(title, read.categories).also {
+                BlockRead.Other("${t.title} ($time): the event that opened was '$title'")
+            !read.categoryRowFound -> BlockRead.Unreadable("${t.title} ($time): couldn't find its categories")
+            else -> BlockRead.Exact(LabelRead.Read(title, read.categories)).also {
                 ScanLog.i("Labels of '$title' ($time): ${read.categories}")
             }
         }
     }
 
     /**
-     * The [nth] block on [date] starting at [start] whose description mentions [title]. The
-     * service normally sees the whole day; scrolling through the grid is the fallback.
-     */
-    internal suspend fun findBlock(date: LocalDate, start: LocalTime, title: String, nth: Int = 0): EventBlock? =
-        findBlocks(date, start, title).let { if (it.isEmpty()) null else it[min(nth, it.lastIndex)] }
-
-    /**
      * Every block on [date] starting at [start] whose description mentions [title], left to right.
-     * "Mentions" is a substring test (titles can contain commas), so callers that act on an event
-     * must check the details that open (BookingNavigator does).
+     * "Mentions" is a substring test (titles can contain commas), so callers must check the details
+     * that open. The service normally sees the whole day; scrolling through the grid is the fallback.
      */
     internal suspend fun findBlocks(date: LocalDate, start: LocalTime, title: String): List<EventBlock> {
         fun matching(root: UiNode) = CalendarReader.eventBlocks(root)
@@ -529,5 +556,41 @@ class OutlookNavigator(
         const val SETTLE_MIN_MS = 700L
         const val SETTLE_QUIET_MS = 350L
         const val SETTLE_MAX_MS = 4_000L
+
+        /** Blocks opened at most for one slot (a title that is part of other titles at the same time). */
+        const val MAX_SLOT_BLOCKS = 6
+    }
+}
+
+/**
+ * Events that share a day, a start and a title ("twins") look the same in Outlook's Day view: its
+ * blocks give no way to tell which is which. So their labels are read from every block that may
+ * be one of them, and count only if those all agree; otherwise none is remembered rather than
+ * one event getting another's labels.
+ */
+internal object LabelSlots {
+    /** How many events the Day view may show for this slot: timed, live and not declined; null: unknown. */
+    fun twins(expected: List<CalEvent>?, date: LocalDate, start: LocalTime, normalisedTitle: String): Int? =
+        expected?.count {
+            it.date == date && !it.allDay && it.start == start && !it.cancelled &&
+                it.selfStatus != Attendee.STATUS_DECLINED && CalEvent.normaliseTitle(it.title) == normalisedTitle
+        }
+
+    /**
+     * The slot's labels from the blocks that opened as exactly [title] ([exact]), with the messages
+     * of blocks that couldn't be read ([unreadable]) and of one that was another event ([other]).
+     */
+    fun decide(title: String, time: String, twins: Int, exact: List<LabelRead.Read>, unreadable: List<String>, other: String?): LabelRead {
+        if (exact.isEmpty()) return LabelRead.Problem(unreadable.firstOrNull() ?: other ?: "$title ($time): not found in Outlook's Day view")
+        val sets = exact.map { r -> r.categories.map { it.trim().lowercase() }.toSet() }.distinct()
+        return when {
+            sets.size > 1 -> LabelRead.Problem(
+                "$title ($time): ${exact.size} events have this title and time but different labels, and Outlook doesn't show which is which",
+            )
+            twins > 1 && (exact.size < twins || unreadable.isNotEmpty()) -> LabelRead.Problem(
+                "$title ($time): $twins events have this title and time, and only ${exact.size} could be read in Outlook",
+            )
+            else -> exact.first()
+        }
     }
 }

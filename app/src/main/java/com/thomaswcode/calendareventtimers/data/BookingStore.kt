@@ -94,7 +94,7 @@ class BookingStore private constructor(private val context: Context) {
         id
     }
 
-    suspend fun setRoom(id: Long, room: String) = db.bookings().setRoom(id, room)
+    suspend fun setRoom(id: Long, room: String, now: Instant = Instant.now()) = db.bookings().setRoom(id, room, now.toEpochMilli())
 
     suspend fun setNotified(id: Long, notified: List<String>) = db.bookings().setNotified(id, ListCodec.encode(notified))
 
@@ -115,8 +115,10 @@ class BookingStore private constructor(private val context: Context) {
             .mapNotNull { p -> p.name?.let { p.email to it } }.toMap()
 
     /**
-     * Reads every upcoming booking's room reply from the phone's calendar (§3.11). A booking that
-     * can't be found a while after it was saved is NOT_FOUND (deleted in Outlook, or never saved).
+     * Reads every upcoming booking's room reply from the phone's calendar (§3.11). A while after it
+     * was saved (time for Outlook to sync it), a booking that can't be found is NOT_FOUND (deleted in
+     * Outlook, or never saved), and one found without a room is NO_ROOM (taken off in Outlook).
+     * Neither holds a room, so its event is offered again.
      */
     suspend fun refreshReplies(now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): Int = withContext(NonCancellable + Dispatchers.IO) {
         val calendar = CalendarStore(context)
@@ -134,10 +136,7 @@ class BookingStore private constructor(private val context: Context) {
         var changed = 0
         for (b in bookings) {
             val match = paired[b.id]
-            val reply = when {
-                match == null -> if (Duration.between(Instant.ofEpochMilli(b.createdAt), now) > NOT_FOUND_AFTER) RoomReply.NOT_FOUND else RoomReply.WAITING
-                else -> RoomCover.roomReply(attendees[match.eventId].orEmpty(), rooms)?.second ?: RoomReply.WAITING
-            }
+            val reply = replyFor(b, found = match != null, room = match?.let { RoomCover.roomReply(attendees[it.eventId].orEmpty(), rooms)?.second }, now)
             if (reply != b.roomReply || (match?.syncId != null && match.syncId != b.bookingSyncId)) {
                 db.bookings().setReply(b.id, reply, match?.syncId, now.toEpochMilli())
                 ScanLog.i("Booking ${b.id} (${b.originalTitle}, ${b.eventDate}): ${b.roomReply} → $reply")
@@ -184,8 +183,23 @@ class BookingStore private constructor(private val context: Context) {
     }
 
     companion object {
-        /** Long enough for Outlook to have synced a new booking into the phone's calendar. */
-        private val NOT_FOUND_AFTER: Duration = Duration.ofMinutes(15)
+        /** Long enough for Outlook to have synced a new or changed booking into the phone's calendar. */
+        private val SYNC_GRACE: Duration = Duration.ofMinutes(15)
+
+        /**
+         * [b]'s reply, from its event in the calendar: [found] or not, and its room's reply ([room],
+         * null when the event has no room). Until Outlook has had time to sync the booking, a missing
+         * event is still WAITING, and a missing room keeps the reply it had (it may be mid-change).
+         */
+        fun replyFor(b: BookingEntity, found: Boolean, room: RoomReply?, now: Instant): RoomReply {
+            if (found && room != null) return room
+            fun settled(since: Long) = Duration.between(Instant.ofEpochMilli(since), now) > SYNC_GRACE
+            return when {
+                !found -> if (settled(b.createdAt)) RoomReply.NOT_FOUND else RoomReply.WAITING
+                settled(maxOf(b.createdAt, b.checkedAt ?: 0L)) -> RoomReply.NO_ROOM
+                else -> b.roomReply
+            }
+        }
 
         fun matches(event: CalEvent, booking: BookingEntity): Boolean =
             CalEvent.normaliseTitle(event.title) == CalEvent.normaliseTitle(booking.bookingTitle) &&
@@ -208,17 +222,13 @@ class BookingStore private constructor(private val context: Context) {
             // Room matches first, for every booking; only then whatever is left, newest booking first.
             for (byRoom in listOf(true, false)) {
                 for (b in bookings.filter { it.id !in out }.sortedByDescending { it.createdAt }) {
-                    val e = events.firstOrNull { it.eventId !in used && matches(it, b) && (!byRoom || sameRoom(roomOf(it), b.room)) } ?: continue
+                    val e = events.firstOrNull { it.eventId !in used && matches(it, b) && (!byRoom || RoomChoice.sameRoom(roomOf(it), b.room)) } ?: continue
                     out[b.id] = e
                     used += e.eventId
                 }
             }
             return out
         }
-
-        /** "KS-106" and Room Finder's "KS-106 (EPH staff only)" are the same room. */
-        private fun sameRoom(a: String?, b: String?): Boolean =
-            a != null && b != null && (a.equals(b, ignoreCase = true) || RoomChoice.matches(a, b) || RoomChoice.matches(b, a))
 
         // Holds the application context only (see get()), which lives as long as the process.
         @SuppressLint("StaticFieldLeak")

@@ -194,7 +194,9 @@ private fun BookingCard(
         RoomReply.DECLINED -> "Declined"
         RoomReply.WAITING -> "Waiting for a reply"
         RoomReply.NOT_FOUND -> "Not in the calendar"
+        RoomReply.NO_ROOM -> "No room on it"
     }
+    val trouble = b.roomReply == RoomReply.DECLINED || b.roomReply == RoomReply.NOT_FOUND || b.roomReply == RoomReply.NO_ROOM
     OutlinedCard(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -202,7 +204,7 @@ private fun BookingCard(
                 Text(
                     "${b.room ?: "?"} · $reply" + if (m.notified.isEmpty()) "" else " · told ${m.notified.size}",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (b.roomReply == RoomReply.DECLINED || b.roomReply == RoomReply.NOT_FOUND) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (trouble) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (m.notified.isNotEmpty()) {
                     Text(m.notified.joinToString { it.display }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
