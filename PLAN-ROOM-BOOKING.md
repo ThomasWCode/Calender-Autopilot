@@ -1,6 +1,7 @@
 # Calendar Autopilot: room booking, and less time in Outlook
 
-Status: **built 2026-10-05 without the phone; not yet run on it.** Everything compiles, lint is
+Status: **built 2026-10-05 without the phone, reviewed 2026-10-06 (PR #1: eight rounds of Codex's
+review and another agent's review); not yet run on the phone.** Everything compiles, lint is
 clean and the unit tests pass, including the screen readers against the Outlook screens captured
 for this plan; what still has to be tried on the Pixel is in [PHONE-CHECKS.md](PHONE-CHECKS.md),
 and the questions that came up while building, with the answers the code assumes meanwhile, are in

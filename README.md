@@ -17,8 +17,9 @@ Outlook keeps in sync), and Outlook is opened only for labels not read before an
 The design and the reasoning behind it are in [PLAN.md](PLAN.md) (alarms) and
 [PLAN-ROOM-BOOKING.md](PLAN-ROOM-BOOKING.md) (room booking, the shared engine).
 
-> **Status, 2026-10-05:** room booking and the engine were built without the phone and haven't run
-> on it yet. [PHONE-CHECKS.md](PHONE-CHECKS.md) lists what to check there first;
+> **Status, 2026-10-06:** room booking and the engine were built without the phone on 2026-10-05 and
+> reviewed on PR #1 (eight rounds of Codex's review and another agent's review); they haven't run on
+> the phone yet. [PHONE-CHECKS.md](PHONE-CHECKS.md) lists what to check there first, in order;
 > [QUESTIONS.md](QUESTIONS.md) the open questions and the answers the code assumes meanwhile.
 
 ## Build and install
