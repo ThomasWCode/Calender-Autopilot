@@ -153,6 +153,29 @@ class BookingStore private constructor(private val context: Context) {
         db.seriesMemory().clear()
     }
 
+    /** How much the app remembers, for Settings → Memory. */
+    data class MemoryCounts(val meetings: Int, val events: Int, val labels: Int, val people: Int) {
+        val isEmpty: Boolean get() = meetings == 0 && events == 0 && labels == 0 && people == 0
+    }
+
+    suspend fun memoryCounts(): MemoryCounts = withContext(Dispatchers.IO) {
+        MemoryCounts(db.seriesMemory().count(), db.answers().count(), db.labels().count(), db.people().count())
+    }
+
+    /**
+     * Clear memory (Settings): forgets everything kept to save presses and Outlook time: answers
+     * for each meeting and each event, the labels read in Outlook, and people's names. Bookings,
+     * alarms and settings stay. The next runs ask about every event again and read each label in
+     * Outlook again.
+     */
+    suspend fun clearMemory() = withContext(NonCancellable + Dispatchers.IO) {
+        db.answers().clear()
+        db.seriesMemory().clear()
+        db.labels().clear()
+        db.people().clear()
+        ScanLog.i("Memory cleared: answers, labels and names forgotten")
+    }
+
     /** Drops records of days long gone. */
     suspend fun prune(today: LocalDate) = withContext(NonCancellable) {
         val before = today.minusWeeks(8).toString()

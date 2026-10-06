@@ -3,8 +3,6 @@ package com.thomaswcode.calendareventtimers.booking
 import android.content.Context
 import com.thomaswcode.calendareventtimers.calendar.CalEvent
 import com.thomaswcode.calendareventtimers.calendar.CalendarStore
-import com.thomaswcode.calendareventtimers.data.AnswerEntity
-import com.thomaswcode.calendareventtimers.data.AnswerKind
 import com.thomaswcode.calendareventtimers.data.AutopilotDatabase
 import com.thomaswcode.calendareventtimers.data.BookingEntity
 import com.thomaswcode.calendareventtimers.data.BookingStore
@@ -205,12 +203,10 @@ object ManageController {
             is BookingOutcome.Failed -> "${booking.originalTitle}: ${outcome.reason}. Nothing was changed."
             is BookingOutcome.Changed -> when (outcome.what) {
                 "deleted" -> {
+                    // Only the booking goes: nothing about deleting it is remembered (the user's choice,
+                    // 2026-10-06), so later runs offer the event again like any event without a room.
                     store.markDeleted(booking.id)
-                    // Deleted on purpose: later runs list it under "answered before" instead of asking again.
-                    AutopilotDatabase.get(context).answers().put(
-                        listOf(AnswerEntity(booking.occurrenceKey, booking.seriesKey, booking.eventDate, AnswerKind.NO_ROOM_WANTED, Instant.now().toEpochMilli())),
-                    )
-                    "${booking.originalTitle}: booking deleted"
+                    "${booking.originalTitle}: booking deleted; it will be offered again"
                 }
                 else -> {
                     peopleAfter?.let { store.setNotified(booking.id, it) }

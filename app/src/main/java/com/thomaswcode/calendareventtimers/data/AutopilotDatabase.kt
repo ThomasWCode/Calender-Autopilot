@@ -124,6 +124,9 @@ interface LabelCacheDao {
 
     @Query("DELETE FROM label_cache WHERE readAt < :before")
     suspend fun prune(before: Long): Int
+
+    @Query("SELECT COUNT(*) FROM label_cache")
+    suspend fun count(): Int
 }
 
 @Dao
@@ -175,6 +178,9 @@ interface AnswerDao {
 
     @Query("DELETE FROM answers WHERE eventDate < :before")
     suspend fun prune(before: String): Int
+
+    @Query("SELECT COUNT(*) FROM answers")
+    suspend fun count(): Int
 }
 
 @Dao
@@ -187,6 +193,9 @@ interface SeriesMemoryDao {
 
     @Query("DELETE FROM series_memory")
     suspend fun clear()
+
+    @Query("SELECT COUNT(*) FROM series_memory")
+    suspend fun count(): Int
 }
 
 @Dao
@@ -196,6 +205,12 @@ interface PersonDao {
 
     @Upsert
     suspend fun put(people: List<PersonEntity>)
+
+    @Query("DELETE FROM people")
+    suspend fun clear()
+
+    @Query("SELECT COUNT(*) FROM people")
+    suspend fun count(): Int
 }
 
 /**
