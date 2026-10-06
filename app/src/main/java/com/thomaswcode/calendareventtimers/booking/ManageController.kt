@@ -91,7 +91,8 @@ object ManageController {
         val events = main?.let { calendar.occurrencesOn(it, today, last, zone) }.orEmpty()
         val bookingEvents = BookingStore.ownBookingEvents(events, mine)
         val attendees = calendar.attendees((events.map { it.eventId } + bookings.map { it.originalEventId }).distinct())
-        val pairs = BookingStore.pair(bookings, bookingEvents) { e -> RoomCover.roomReply(attendees[e.eventId].orEmpty(), rooms)?.first }
+        val settled = bookings.filter { BookingStore.synced(it, Instant.now()) }.map { it.id }.toSet()
+        val pairs = BookingStore.pair(bookings, bookingEvents, settled) { e -> RoomCover.roomReply(attendees[e.eventId].orEmpty(), rooms)?.first }
         val paired = pairs.values.map { it.occurrenceKey }.toSet()
         // Events that may be one of the app's own (unsure which) aren't listed as found in the calendar.
         val unsure = BookingStore.unsure(bookings, bookingEvents, pairs).let { ids -> bookings.filter { it.id in ids } }
@@ -108,8 +109,16 @@ object ManageController {
             val notified = ListCodec.decode(b.notified).map { Person(it, names[it]) }
             val original = originals[b.id]
             val offered = original?.let { People.toNotify(attendees[it.eventId].orEmpty(), it.organizer, mine, rooms) }.orEmpty()
-            ManagedBooking(b, notified, (offered + notified).distinctBy { it.email }, warnings(b, original, events, labels, main != null), fromCalendar)
+            // A booking found in the calendar is for a meeting of its title at its time; with two, unclear which.
+            val unclear = fromCalendar && original == null && meetingsLike(b.originalTitle, b.eventDate, b.start, events).size > 1
+            ManagedBooking(b, notified, (offered + notified).distinctBy { it.email }, warnings(b, original, events, labels, main != null, unclear), fromCalendar)
         }
+    }
+
+    /** Meetings a booking called "Room Booking - [title]" may be for: that title, on [date] at [start]. */
+    private fun meetingsLike(title: String, date: String, start: String, events: List<CalEvent>): List<CalEvent> = events.filter {
+        !BookingRules.isRoomBooking(it.title) && it.date.toString() == date && TriggerTime.formatHhMm(it.start) == start &&
+            CalEvent.normaliseTitle(it.title) == CalEvent.normaliseTitle(title)
     }
 
     /**
@@ -126,7 +135,8 @@ object ManageController {
     /**
      * The user's live booking events among [unpaired] (none of the app's records is theirs), as
      * bookings with negative ids: they aren't in the database, and changes to them aren't recorded
-     * (the calendar shows them next time). The original is the event of that title at that start.
+     * (the calendar shows them next time). The original is the event of that title at that start,
+     * when there is only one: with two, neither's people or warnings are given to the booking.
      */
     internal fun calendarOnly(
         unpaired: List<CalEvent>, events: List<CalEvent>, attendees: Map<Long, List<Attendee>>, rooms: List<String>, mine: Set<String>,
@@ -135,9 +145,7 @@ object ManageController {
         .sortedBy { it.begin }
         .mapIndexed { i, e ->
             val title = BookingRules.originalTitle(e.title)
-            val original = events.firstOrNull { o ->
-                !BookingRules.isRoomBooking(o.title) && o.begin == e.begin && CalEvent.normaliseTitle(o.title) == CalEvent.normaliseTitle(title)
-            }
+            val original = meetingsLike(title, e.date.toString(), TriggerTime.formatHhMm(e.start), events).singleOrNull()
             val on = attendees[e.eventId].orEmpty()
             val reply = RoomCover.roomReply(on, rooms)
             val told = on.filter { !it.isResource && RoomChoice.roomIn(it.email, rooms) == null }
@@ -162,9 +170,13 @@ object ManageController {
             )
         }
 
-    /** What has changed since [b] was made: a declined room, the original moved, gone or relabelled. */
+    /**
+     * What has changed since [b] was made: a declined room, the original moved, gone or relabelled.
+     * [unclear]: a booking found in the calendar matches more than one meeting.
+     */
     internal fun warnings(
         b: BookingEntity, original: CalEvent?, events: List<CalEvent>, labels: Map<String, List<String>>, canCheck: Boolean,
+        unclear: Boolean = false,
     ): List<String> {
         val out = ArrayList<String>()
         when (b.roomReply) {
@@ -174,7 +186,9 @@ object ManageController {
             else -> Unit
         }
         if (!canCheck) return out
-        if (original == null) {
+        if (unclear) {
+            out += "More than one “${b.originalTitle}” is at ${b.start}: which this booking is for isn't clear, so nobody from them is offered."
+        } else if (original == null) {
             val sameDay = events.filter {
                 it.date.toString() == b.eventDate && CalEvent.normaliseTitle(it.title) == CalEvent.normaliseTitle(b.originalTitle) && !it.cancelled
             }

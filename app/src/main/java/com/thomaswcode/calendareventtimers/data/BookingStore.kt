@@ -145,7 +145,8 @@ class BookingStore private constructor(private val context: Context) {
         val rooms = Prefs.rooms.value
         val events = ownBookingEvents(calendar.occurrencesOn(main, dates.min(), dates.max(), zone), BookingController.myAddresses(main))
         val attendees = calendar.attendees(events.map { it.eventId })
-        val paired = pair(bookings, events) { e -> RoomCover.roomReply(attendees[e.eventId].orEmpty(), rooms)?.first }
+        val settled = bookings.filter { synced(it, now) }.map { it.id }.toSet()
+        val paired = pair(bookings, events, settled) { e -> RoomCover.roomReply(attendees[e.eventId].orEmpty(), rooms)?.first }
         val unsure = unsure(bookings, events, paired)
         var changed = 0
         for (b in bookings) {
@@ -224,9 +225,12 @@ class BookingStore private constructor(private val context: Context) {
          * a missing room keeps the reply it had; after that, a missing event is NOT_FOUND, a booking
          * without a room is NO_ROOM, and one with another room (changed in Outlook) follows it.
          */
+        /** Long enough since [b] was made, or its room or reply last changed, for Outlook to have synced it. */
+        fun synced(b: BookingEntity, now: Instant): Boolean =
+            Duration.between(Instant.ofEpochMilli(maxOf(b.createdAt, b.checkedAt ?: 0L)), now) > SYNC_GRACE
+
         fun replyFor(b: BookingEntity, found: Boolean, rooms: List<Pair<String, RoomReply>>, now: Instant): ReplyCheck {
-            // Synced: long enough since the booking was made, or since its room or reply last changed.
-            val synced = Duration.between(Instant.ofEpochMilli(maxOf(b.createdAt, b.checkedAt ?: 0L)), now) > SYNC_GRACE
+            val synced = synced(b, now)
             if (!found) return ReplyCheck(if (synced) RoomReply.NOT_FOUND else b.roomReply)
             rooms.firstOrNull { RoomChoice.sameRoom(it.first, b.room) }?.let { return ReplyCheck(it.second) }
             if (!synced) return ReplyCheck(b.roomReply)
@@ -253,12 +257,16 @@ class BookingStore private constructor(private val context: Context) {
          * one. A booking whose event has been seen is followed by that event's sync id only, and only at
          * the booking's own time: moved in Outlook, or gone, it is missing rather than given another
          * event that looks like it. A booking not seen yet is found by title, date and start, never in
-         * an event another booking has seen: the one booking and the one event of that title and time;
-         * or, among several (a re-booked event leaves the declined booking at the same time and title),
-         * only a booking and an event that fit each other alone by room ([roomOf]) and end. Anything
-         * less clear stays unpaired ([unsure]) rather than tie two bookings to each other's events.
+         * an event another booking has seen: a booking and an event that fit each other alone by room
+         * ([roomOf]) and end (a re-booked event leaves the declined booking at the same time and title);
+         * or, once the booking has had time to sync ([settled]), the one event of its title and time
+         * even with another room or end (changed in Outlook). Before then a lone event that doesn't
+         * fit may be an old one, the booking's own not yet synced. Anything less clear stays unpaired
+         * ([unsure]) rather than tie a booking to another's event.
          */
-        fun pair(bookings: List<BookingEntity>, events: List<CalEvent>, roomOf: (CalEvent) -> String?): Map<Long, CalEvent> {
+        fun pair(
+            bookings: List<BookingEntity>, events: List<CalEvent>, settled: Set<Long> = emptySet(), roomOf: (CalEvent) -> String?,
+        ): Map<Long, CalEvent> {
             val live = events.filter { !it.cancelled }
             val claimed = bookings.mapNotNull { it.bookingSyncId }.toSet()
             val used = HashSet<Long>()
@@ -275,7 +283,7 @@ class BookingStore private constructor(private val context: Context) {
             val unseen = bookings.filter { it.bookingSyncId == null }
             for (group in unseen.groupBy { Triple(CalEvent.normaliseTitle(it.bookingTitle), it.eventDate, it.start) }.values) {
                 val candidates = free.filter { matches(it, group.first()) }
-                if (group.size == 1 && candidates.size == 1) {
+                if (group.size == 1 && candidates.size == 1 && group.single().id in settled) {
                     out[group.single().id] = candidates.single()
                     continue
                 }

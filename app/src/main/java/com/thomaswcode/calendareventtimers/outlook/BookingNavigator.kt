@@ -229,11 +229,12 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         driver.click(button, "New event")
         waitForForm("The new event form didn't open", 6_000)
         delay(300)
+        // With several accounts in Outlook, the form may start in another one: never book from there,
+        // nor from an account that can't be read (nothing is typed into this form before this check).
         val account = EventFormReader.accountAddress(driver.snapshot())
-        // With several accounts in Outlook, the form may start in another one: never book from there.
-        if (account != null && !People.isLshtmPerson(account)) fail("The new event would be made in $account's calendar, not your LSHTM one")
-        if (account == null) ScanLog.w("Couldn't read the form's account")
-        accountAddress = account ?: accountAddress
+            ?: fail("Couldn't read which account the new event is in, so it wasn't booked (Outlook may have changed)")
+        if (!People.isLshtmPerson(account)) fail("The new event would be made in $account's calendar, not your LSHTM one")
+        accountAddress = account
     }
 
     /**
