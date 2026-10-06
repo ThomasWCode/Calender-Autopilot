@@ -1,5 +1,6 @@
 package com.thomaswcode.calendareventtimers.calendar
 
+import com.thomaswcode.calendareventtimers.booking.People
 import java.time.Instant
 import java.time.ZoneId
 
@@ -32,16 +33,22 @@ object CalendarRows {
     }
 
     /**
-     * Outlook's main calendar: the one its event details call "Calendar (<account>)". Room and group
-     * calendars are synced too, so it is picked by name among the ones the user owns; never by id,
-     * which is local to the phone.
+     * Outlook's main calendar: the one its event details call "Calendar (<account>)" for the user's
+     * LSHTM account. Room and group calendars are synced too, so it is picked by name among the ones
+     * the user owns; never by id, which is local to the phone. With other accounts in Outlook (each
+     * has a "Calendar"), only an LSHTM account's counts, and two of them are too many to choose from.
      */
     fun mainCalendar(calendars: List<ProviderCalendar>): ProviderCalendar? {
-        val owned = calendars.filter { it.accountType == OUTLOOK_ACCOUNT_TYPE && it.accessLevel >= ACCESS_OWNER }
-        return owned.firstOrNull { it.name.equals("Calendar", ignoreCase = true) }
-            ?: owned.firstOrNull { it.displayName.equals("Calendar", ignoreCase = true) }
-            ?: owned.singleOrNull()
+        val owned = calendars.filter {
+            it.accountType == OUTLOOK_ACCOUNT_TYPE && it.accessLevel >= ACCESS_OWNER &&
+                (isWork(it.accountName) || isWork(it.ownerAccount))
+        }
+        val named = owned.filter { it.name.equals("Calendar", ignoreCase = true) }
+            .ifEmpty { owned.filter { it.displayName.equals("Calendar", ignoreCase = true) } }
+        return if (named.isNotEmpty()) named.singleOrNull() else owned.singleOrNull()
     }
+
+    private fun isWork(address: String?): Boolean = address != null && People.isLshtmPerson(address.trim())
 
     /**
      * Occurrences from the `instances` table, completed with sync columns from the `events` table

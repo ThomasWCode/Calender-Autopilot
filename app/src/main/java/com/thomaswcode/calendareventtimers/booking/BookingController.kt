@@ -136,7 +136,7 @@ object BookingController {
         Prefs.ensureLoaded(app)
         val store = CalendarStore(app)
         val calendar = withContext(Dispatchers.IO) { store.mainCalendar() }
-            ?: return State.Failed(range, "Outlook's calendar isn't in the phone's calendar store. Open Outlook once and check that it syncs its calendar to the phone.")
+            ?: return State.Failed(range, "Outlook's LSHTM calendar isn't in the phone's calendar store (or there is more than one). Open Outlook once and check that it syncs your LSHTM calendar to the phone.")
         val now = Instant.now()
         val daySet = days.toSet()
         val events = withContext(Dispatchers.IO) { store.occurrencesOn(calendar, days.first(), days.last(), zone) }
