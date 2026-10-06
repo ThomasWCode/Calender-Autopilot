@@ -12,6 +12,7 @@ import com.thomaswcode.calendareventtimers.domain.Review
 import com.thomaswcode.calendareventtimers.domain.ReviewItem
 import com.thomaswcode.calendareventtimers.domain.ScannedEvent
 import com.thomaswcode.calendareventtimers.domain.TriggerTime
+import com.thomaswcode.calendareventtimers.domain.cleanUiText
 import com.thomaswcode.calendareventtimers.engine.LabelPass
 import com.thomaswcode.calendareventtimers.engine.LabelTarget
 import com.thomaswcode.calendareventtimers.outlook.AppScope
@@ -174,7 +175,11 @@ object ScanController {
             val reused = if (distrusted) emptyMap() else plan.known
             val known = reused + read.mapKeys { it.key.labelKey }
             val events = upcoming.mapNotNull { e ->
-                known[e.labelKey]?.let { cats -> ScannedEvent(e.title.trim(), e.date, e.start, e.location, cats) }
+                // Cleaned as Outlook's screens are (bidi marks, non-breaking spaces), so an alarm set by
+                // a whole-day scan is recognised as this event's, not set twice.
+                known[e.labelKey]?.let { cats ->
+                    ScannedEvent(cleanUiText(e.title).orEmpty(), e.date, e.start, cleanUiText(e.location)?.ifEmpty { null }, cats)
+                }
             }
             val problems = reads.values.mapNotNull { (it as? LabelRead.Problem)?.message } +
                 listOfNotNull(LabelPass.distrusted(upcoming.count { it.labelKey in plan.known }).takeIf { distrusted })

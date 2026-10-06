@@ -140,6 +140,6 @@ Save as fixtures (`app/src/test/resources/fixtures/booking/`) with uiautomator d
 | Closed sub-screens (Add Location, Room Finder, Add People, picker) leave the tree, or at least stop being visible | the `visibleId` checks in `BookingReaders.kt`, `onlyForm` | every step would time out with "…didn't close" |
 | Chips show their person's address | `typePeople`, `removePerson` (strict) | B8: bookings that tell people fail (Q18) |
 | The details screen's time reads "HH:MM to HH:MM, duration: …" (gives the end) | `DetailsReader.read` → `end` | without it, Manage bookings tells events apart by title, start and room only |
-| The form's account row reads "Name, address" | `EventFormReader.accountAddress` | no account check (logged); a non-LSHTM account would only be refused when read |
+| The form's account row reads "Name, address" | `EventFormReader.accountAddress` | B1: if it can't be read, **every booking fails** (by design: never book from an unknown account) until the reader is fixed |
 | A visible overlay asking for portrait holds the screen upright | `ScanOverlay` (`screenOrientation`) | A10: Q17's fallback |
 | Opening a booking for Change room / Edit people / Delete finds the right one: exact title, start, recorded room | `BookingNavigator.openForEdit` | D3–D5, also with two bookings at the same time (a re-booking after a decline) |

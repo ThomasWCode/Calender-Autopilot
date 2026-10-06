@@ -89,10 +89,17 @@ class AmbiguousPairingTest {
     }
 
     @Test
-    fun theOnlyBookingAndTheOnlyEventStillPair() {
-        // Its room was changed in Outlook before the app first saw it: still the one.
-        val pairs = BookingStore.pair(listOf(booking(1, "KS-121", "09:30")), listOf(event(10, "09:30"))) { "KS-117" }
-        assertEquals(10L, pairs.getValue(1).eventId)
+    fun theOnlyEventPairsEvenWithAnotherRoomOnceSynced() {
+        // Another room than the booking's: maybe an old booking event, the new one not synced yet.
+        val bookings = listOf(booking(1, "KS-121", "09:30"))
+        val events = listOf(event(10, "09:30"))
+        val early = BookingStore.pair(bookings, events) { "KS-117" }
+        assertTrue(early.isEmpty())
+        assertEquals(setOf(1L), BookingStore.unsure(bookings, events, early))
+        // Synced and still the only one: the room was changed in Outlook.
+        assertEquals(10L, BookingStore.pair(bookings, events, settled = setOf(1L)) { "KS-117" }.getValue(1).eventId)
+        // One that fits pairs straight away.
+        assertEquals(10L, BookingStore.pair(bookings, events) { "KS-121" }.getValue(1).eventId)
     }
 }
 

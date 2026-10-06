@@ -718,6 +718,11 @@ bookings). Where it differs from, or adds to, the sections above:
   entries are matched to titles as titles are compared (invisible marks, non-breaking spaces,
   case); a meeting's own booking for part of its time shows as a note even before the calendar
   has it; Manage bookings finds a meeting again by its row and time after its sync id changes.
+- **Fifth round (Codex, 2026-10-06).** A booking is refused when the form's account can't be read,
+  not only when it is another one; titles from the phone's calendar are cleaned as Outlook's are,
+  so an alarm set by a whole-day scan isn't set again; a booking found only in the calendar isn't
+  linked to a meeting when two of that title are at its time; a new booking is tied to a lone event
+  at its time with another room only after the sync grace (before, it may be an old one).
 - **The screen stays upright** during every Outlook run (the user's request, 2026-10-06): the STOP
   strip asks for portrait, which Android honours for any visible window, as if auto-rotate were off.
   Nothing to restore: the hold goes with the strip, even if the app crashes. If the run starts
