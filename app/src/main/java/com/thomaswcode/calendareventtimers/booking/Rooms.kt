@@ -76,11 +76,14 @@ object RoomChoice {
     fun namesRoom(location: String?, room: String?): Boolean =
         location?.split(';')?.any { sameRoom(it.trim(), room) } == true
 
-    /** "Free" / "Busy" as Outlook shows them; anything else isn't known (e.g. still loading). */
+    /**
+     * "Free" / "Busy" as Outlook shows them. Only a plain "Free" is free: anything qualified ("Free
+     * until 09:15") or unknown (still loading) counts as busy, like an unknown status.
+     */
     fun status(detail: String?): RoomStatus {
         val d = detail?.trim()?.lowercase() ?: return RoomStatus.UNKNOWN
         return when {
-            d.startsWith("free") -> RoomStatus.FREE
+            d == "free" -> RoomStatus.FREE
             d.startsWith("busy") -> RoomStatus.BUSY
             else -> RoomStatus.UNKNOWN
         }

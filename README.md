@@ -84,21 +84,28 @@ Alarm labels read `Title (Label) @ Location`, with meeting links shortened: `Kri
 - The **wizard** shows one event at a time: *Book a room?* (Yes) and, if yes, *Notify the others?*
   (No); if yes, the LSHTM invitees (staff, student, honorary, alumni addresses; never mailing lists or
   rooms) each with **✕**. Answers for a meeting that comes back are remembered, so next time each
-  event is one **Next**; *Use these answers for the rest* jumps ahead. Events answered *no room*
-  before aren't asked again; the summary lists them.
+  event is one **Next**; *Keep the rest as suggested* goes straight to the summary, the remaining
+  events keeping the answers shown for them (last time's, else Yes and No). Events answered *no
+  room* before aren't asked again; the summary lists them.
 - The **summary** shows every event, who will be told and how long Outlook will be on screen. **Book
   Rooms** books them in one go: for each, a new Outlook event with the same time (set on Outlook's
   *Choose Time* wheels), the first free room of your list (Location → *Or browse with Room Finder* →
-  KS-Rooms), the title `Room Booking - …`, the people, the same description and no alert. Each form
-  is read back before it is saved; a failed step, or STOP, discards it. Just before each booking the
-  event is checked in the phone's calendar again: one moved, renamed, cancelled or given a room since
-  you answered isn't booked (run again), and people no longer invited aren't told.
+  KS-Rooms), the title `Room Booking - …`, the people, the same description and no alert. Before
+  Save, the time, room, title and alert are read back, and each person told must show on a chip by
+  their address (the description is checked only roughly); a failed step, or STOP, discards the
+  form. Just before each booking the event is checked in the phone's calendar again: one moved,
+  renamed, cancelled or given a room since you answered isn't booked (run again), and people no
+  longer invited aren't told. A room counts as free only when Room Finder says plain *Free*.
 - The **results** say what each event got: booked (with the room's reply as it arrives: *Reserved*,
-  *Declined*…), no free room, failed. Rooms not in Room Finder are named.
+  *Declined*…), no free room, failed, or *maybe booked* when Outlook didn't show whether it saved
+  (check Outlook; the app finds out from the calendar). Rooms not in Room Finder are named.
 - **⋮ → Manage bookings**: your bookings from today on, with warnings (room declined or taken off,
-  event moved or gone); per booking *Change room*, *Edit people*, *Delete booking* (Outlook sends the cancellations;
-  nothing about the deletion is remembered, so the event is offered again next time).
-- **⋮ → Dry run**: every booking is filled in in Outlook, room included, then discarded.
+  event moved or gone), and any `Room Booking - …` events of yours the app has no record of; per
+  booking *Change room*, *Edit people*, *Delete booking* (Outlook sends the cancellations; nothing
+  about the deletion is remembered, so the event is offered again next time). The app acts only
+  when exactly one event in Outlook fits the booking; changes here are always real.
+- **⋮ → Dry run**: every booking is filled in in Outlook, room included, then discarded; no
+  bookings or answers are recorded (labels read and people's names are still remembered).
 - **Settings**: the rooms, in order (add, remove, reorder, reset to the 25 KS rooms); Room Finder's
   building; the Recent-list shortcut; your own addresses; and **Clear memory**, which forgets every
   remembered answer, label and name (bookings, alarms and settings stay), or only the answers or the
@@ -106,6 +113,10 @@ Alarm labels read `Title (Label) @ Location`, with meeting links shortened: `Kri
 
 While a booking runs, the description is pasted through the clipboard, which is cleared afterwards
 (anything you had copied is gone).
+
+Whenever the app is working in Outlook (timers or rooms), the screen stays upright: turning the
+phone doesn't turn it to landscape. The strip over the status bar holds it, as if auto-rotate were
+off, and lets go when the run ends; your auto-rotate setting itself is never changed.
 
 ## How it works
 

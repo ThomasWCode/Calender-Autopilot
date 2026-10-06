@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import com.thomaswcode.calendareventtimers.booking.DescriptionText
 import com.thomaswcode.calendareventtimers.booking.FormText
+import com.thomaswcode.calendareventtimers.booking.People
 import com.thomaswcode.calendareventtimers.booking.RoomChoice
 import com.thomaswcode.calendareventtimers.booking.RoomDecision
 import com.thomaswcode.calendareventtimers.booking.RoomRow
@@ -49,10 +50,19 @@ sealed interface BookingOutcome {
 
     /** A change to an existing booking went through. */
     data class Changed(val what: String) : BookingOutcome
+
+    /**
+     * Save was pressed, but what Outlook showed next doesn't say whether it saved: Outlook must be
+     * checked. [room]: the room on the form, for a new booking or a room change.
+     */
+    data class Uncertain(val room: String?, val reason: String) : BookingOutcome
 }
 
 /** A step of one booking that didn't work: that booking fails (its form is discarded); the run goes on. */
 class BookingStepFailure(message: String) : Exception(message)
+
+/** After Save, Outlook went somewhere that doesn't say whether it saved. */
+class SaveUncertain(message: String, val room: String?) : Exception(message)
 
 /**
  * Fills in Outlook's event form to book a room, and changes or deletes bookings (Manage bookings).
@@ -77,6 +87,8 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         nav.ensureOnDay(job.date)
         return withFormGuard(job.title) {
             openNewEventForm()
+            // Never the user themselves: the form shows the account's address (an alias may be new).
+            val people = job.people.filterNot { p -> accountAddress?.let { p.equals(it, ignoreCase = true) } == true }
             setTime(job.date, job.start, job.end)
             val room = chooseRoom(settings, clearFirst = false)
             if (room == null) {
@@ -84,15 +96,15 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
                 return@withFormGuard BookingOutcome.NoRoom(missingRooms)
             }
             setTitle(job.title)
-            if (job.people.isNotEmpty()) addPeople(job.people)
+            if (people.isNotEmpty()) addPeople(people)
             if (!DescriptionText.isEmpty(job.description)) setDescription(job.description!!)
             setAlertNone()
-            verifyForm(job.title, job.date, job.start, job.end, room, job.people.size)
+            verifyForm(job.title, job.date, job.start, job.end, room, people.size)
             if (dryRun) {
                 ScanLog.i("Dry run: '${job.title}' filled in with $room; discarding it")
                 discard()
             } else {
-                save()
+                save(room)
                 ScanLog.i("Saved '${job.title}' with $room")
             }
             BookingOutcome.Booked(room, saved = !dryRun, notes.toList())
@@ -101,44 +113,51 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
 
     /**
      * Manage bookings: the next free room for an existing booking (its current room cleared first).
-     * [room] is the booking's room as the app recorded it, to tell it from another booking with the
-     * same title and time; [settings] should leave that room out (it may have declined).
+     * [room] and [end] are the booking's as the app recorded them, to tell it from another booking with
+     * the same title and start; [settings] should leave that room out (it may have declined).
      */
-    suspend fun changeRoom(date: LocalDate, start: LocalTime, title: String, room: String?, settings: RoomSettings): BookingOutcome {
+    suspend fun changeRoom(date: LocalDate, start: LocalTime, end: LocalTime?, title: String, room: String?, settings: RoomSettings): BookingOutcome {
         notes.clear()
         return withFormGuard(title) {
-            openForEdit(date, start, title, room)
+            openForEdit(date, start, end, title, room)
             val chosen = chooseRoom(settings, clearFirst = true)
             if (chosen == null) {
                 discard()
                 return@withFormGuard BookingOutcome.NoRoom(missingRooms)
             }
-            save()
+            save(chosen)
             BookingOutcome.Booked(chosen, saved = true, notes.toList())
         }
     }
 
-    /** Manage bookings: tell [add] about a booking, and take [remove] off it. */
+    /**
+     * Manage bookings: tell [add] about a booking, and take [remove] off it. The people are read back
+     * before saving: everyone in [remove] gone, everyone in [add] there.
+     */
     suspend fun editPeople(
-        date: LocalDate, start: LocalTime, title: String, room: String?, add: List<String>, remove: List<String>,
+        date: LocalDate, start: LocalTime, end: LocalTime?, title: String, room: String?, add: List<String>, remove: List<String>,
     ): BookingOutcome {
         notes.clear()
         return withFormGuard(title) {
-            openForEdit(date, start, title, room)
+            openForEdit(date, start, end, title, room)
             openPeople()
             for (email in remove) removePerson(email)
             if (add.isNotEmpty()) typePeople(add)
+            val on = PeopleReader.chipAddresses(driver.snapshot())
+            (remove.filter { it.lowercase() in on } + add.filter { it.lowercase() !in on }).takeIf { it.isNotEmpty() }?.let {
+                fail("The people on the booking didn't come out as asked (${it.joinToString()}); nothing was saved")
+            }
             closePeople()
-            save()
+            save(null)
             BookingOutcome.Changed("people updated")
         }
     }
 
     /** Manage bookings: deletes the booking event (Outlook sends the cancellations). */
-    suspend fun deleteBooking(date: LocalDate, start: LocalTime, title: String, room: String?): BookingOutcome {
+    suspend fun deleteBooking(date: LocalDate, start: LocalTime, end: LocalTime?, title: String, room: String?): BookingOutcome {
         notes.clear()
         return withFormGuard(title) {
-            openForEdit(date, start, title, room)
+            openForEdit(date, start, end, title, room)
             val form = driver.snapshot()
             var row = EventFormReader.deleteRow(form)
             var scrolls = 0
@@ -159,28 +178,45 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
                 ScanLog.dump("Unexpected delete prompt", driver.snapshot().calendarOnlyDump())
                 fail("Outlook asked '$message' with '$label'; not answered")
             }
-            driver.click(dialog, label)
-            if (!driver.waitUntil(8_000) { CalendarReader.isCalendar(driver.snapshot()) && !EventFormReader.isForm(driver.snapshot()) }) {
-                fail("Outlook didn't go back to the calendar after deleting")
+            // Once confirmed, the delete runs to its end even after STOP, so the app records it.
+            withContext(NonCancellable) {
+                driver.click(dialog, label)
+                if (!driver.waitUntil(8_000) { CalendarReader.isCalendar(driver.snapshot()) && !EventFormReader.isForm(driver.snapshot()) }) {
+                    throw SaveUncertain("Outlook didn't go back to the calendar after the delete was confirmed; it may have been deleted, check Outlook", null)
+                }
             }
             BookingOutcome.Changed("deleted")
         }
     }
 
     /**
-     * Runs one booking's steps. A failed step fails only this booking; STOP (cancellation) still
-     * leaves Outlook without a half-made event. Navigation failures (ScanFailure) end the run.
+     * Runs one booking's steps. A failed step fails only this booking, once its form is gone; if the
+     * form can't be left, the run stops (ScanFailure), so nothing else is typed into it. STOP
+     * (cancellation) still leaves Outlook without a half-made event. Navigation failures end the run.
      */
     private suspend fun withFormGuard(title: String, block: suspend () -> BookingOutcome): BookingOutcome = try {
         block()
     } catch (e: BookingStepFailure) {
         ScanLog.e("'$title': ${e.message}")
         runCatching { ScanLog.dump("Booking step failed: ${e.message}", driver.snapshot().calendarOnlyDump()) }
-        withContext(NonCancellable) { discardQuietly() }
+        leaveForm(e.message)
         BookingOutcome.Failed(e.message ?: "a step failed")
+    } catch (e: SaveUncertain) {
+        ScanLog.w("'$title': ${e.message}")
+        leaveForm(e.message)
+        BookingOutcome.Uncertain(e.room, e.message ?: "Outlook didn't say whether it saved")
     } catch (e: CancellationException) {
         withContext(NonCancellable) { discardQuietly() }
         throw e
+    }
+
+    /** Out of the form without saving, or the run stops: anything more could go into a form still open. */
+    private suspend fun leaveForm(why: String?) {
+        val stuck = withContext(NonCancellable) { runCatching { discard() }.exceptionOrNull() } ?: return
+        throw ScanFailure(
+            "${why ?: "A step failed"}; then Outlook's form couldn't be closed (${stuck.message}). " +
+                "Stopped so that nothing else goes into it: check Outlook for an unsaved event.",
+        )
     }
 
     // ---- The form ----
@@ -191,44 +227,57 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         driver.click(button, "New event")
         waitForForm("The new event form didn't open", 6_000)
         delay(300)
-        accountAddress = EventFormReader.accountAddress(driver.snapshot()) ?: accountAddress
+        val account = EventFormReader.accountAddress(driver.snapshot())
+        // With several accounts in Outlook, the form may start in another one: never book from there.
+        if (account != null && !People.isLshtmPerson(account)) fail("The new event would be made in $account's calendar, not your LSHTM one")
+        if (account == null) ScanLog.w("Couldn't read the form's account")
+        accountAddress = account ?: accountAddress
     }
 
     /**
      * Opens the booking's Edit Event form. The Day view only narrows it down (a title can be part of
-     * another, and a re-booked event leaves the declined booking at the same time), so each candidate
-     * is opened and its details checked: exactly [title], at [start], and in [room] when there is more
-     * than one such event. Only then is Edit pressed, since editing or deleting the wrong event sends
-     * mail to its invitees.
+     * another, and a re-booked event leaves the declined booking at the same time), so every candidate
+     * is opened and its details checked: exactly [title], from [start] to [end], in [room]. Edit is
+     * pressed only on the one event that fits; when two fit, nothing tells them apart, so nothing is
+     * changed (editing or deleting the wrong event sends mail to its invitees).
      */
-    private suspend fun openForEdit(date: LocalDate, start: LocalTime, title: String, room: String?) {
+    private suspend fun openForEdit(date: LocalDate, start: LocalTime, end: LocalTime?, title: String, room: String?) {
         nav.ensureOnDay(date)
         val time = TriggerTime.formatHhMm(start)
         val count = nav.findBlocks(date, start, title).size
         if (count == 0) fail("Couldn't find '$title' at $time in the Day view")
-        var titleOnly: Int? = null
+        val exact = ArrayList<Int>()
+        val otherRoom = ArrayList<Int>()
         for (i in 0 until count) {
-            when (openCandidate(date, start, title, room, i)) {
-                Candidate.EXACT -> return pressEdit(title)
-                // A second one with the right title but another room: can't tell which (-1).
-                Candidate.OTHER_ROOM -> titleOnly = if (titleOnly == null) i else -1
+            val fit = openCandidate(date, start, end, title, room, i)
+            // The only block, and it fits: its details are open, so straight to Edit.
+            if (fit == Candidate.EXACT && count == 1) return pressEdit(title)
+            when (fit) {
+                Candidate.EXACT -> exact += i
+                Candidate.OTHER_ROOM -> otherRoom += i
                 Candidate.NO -> Unit
             }
             // Back to the Day view; Back on the calendar itself would leave Outlook.
             if (DetailsReader.isDetails(driver.snapshot())) nav.closeDetails()
             nav.ensureOnDay(date)
         }
-        // The room may have been changed in Outlook since: fine if it is the only event so called.
-        val only = titleOnly?.takeIf { it >= 0 } ?: fail("None of the events at $time is '$title'${room?.let { " in $it" } ?: ""}")
-        notes += "the booking's room in Outlook isn't the one the app recorded"
-        if (openCandidate(date, start, title, null, only) != Candidate.EXACT) fail("'$title' at $time couldn't be opened again")
+        val where = room?.let { " in $it" }.orEmpty()
+        val pick = when {
+            exact.size == 1 -> exact.single()
+            exact.size > 1 -> fail("${exact.size} events at $time are '$title'$where, and Outlook doesn't show which is the booking; change it in Outlook")
+            // The room may have been changed in Outlook since: fine if it is the only event so called.
+            otherRoom.size == 1 -> otherRoom.single().also { notes += "the booking's room in Outlook isn't the one the app recorded" }
+            otherRoom.size > 1 -> fail("${otherRoom.size} events at $time are '$title', none$where; change it in Outlook")
+            else -> fail("None of the events at $time is '$title'$where")
+        }
+        if (openCandidate(date, start, end, title, room.takeIf { exact.isNotEmpty() }, pick) != Candidate.EXACT) fail("'$title' at $time couldn't be opened again")
         pressEdit(title)
     }
 
     private enum class Candidate { EXACT, OTHER_ROOM, NO }
 
-    /** Opens the [nth] block that may be [title] at [start] and says whether it is. */
-    private suspend fun openCandidate(date: LocalDate, start: LocalTime, title: String, room: String?, nth: Int): Candidate {
+    /** Opens the [nth] block that may be [title] at [start] and says whether it is (its details stay open). */
+    private suspend fun openCandidate(date: LocalDate, start: LocalTime, end: LocalTime?, title: String, room: String?, nth: Int): Candidate {
         val block = nav.findBlocks(date, start, title).getOrNull(nth) ?: return Candidate.NO
         if (!nav.openEvent(block, title)) {
             nav.returnToCalendar()
@@ -236,8 +285,9 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         }
         val details = driver.snapshot()
         val read = DetailsReader.read(details)
-        ScanLog.i("Opened '${read.title}' at ${read.start} in ${read.location} ${DetailsReader.locationResponse(details) ?: ""}")
-        if (!FormText.sameText(read.title, title) || (read.start != null && read.start != start)) return Candidate.NO
+        ScanLog.i("Opened '${read.title}' at ${read.start}–${read.end} in ${read.location} ${DetailsReader.locationResponse(details) ?: ""}")
+        if (!FormText.sameText(read.title, title) || read.start != start) return Candidate.NO
+        if (end != null && read.end != null && read.end != end) return Candidate.NO
         // One location row must be the room itself: KS-103 must not pass for KS-103D.
         if (room == null || read.locations.any { RoomChoice.sameRoom(it, room) }) return Candidate.EXACT
         return Candidate.OTHER_ROOM
@@ -494,28 +544,38 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         PeopleReader.requiredTab(driver.snapshot())?.let { if (!it.selected) driver.click(it, "Required") }
     }
 
-    /** Types the addresses, each followed by a comma, which turns it into a chip (§2.6). */
+    /**
+     * Types the addresses, each followed by a comma, which turns it into a chip (§2.6). Each address
+     * must then show on a chip: nobody is invited unless the form shows exactly who (a chip that
+     * doesn't show its address could be someone else).
+     */
     private suspend fun typePeople(emails: List<String>) {
-        val before = PeopleReader.chipCount(driver.snapshot())
+        val want = emails.map { it.lowercase() }
         val input = PeopleReader.input(driver.snapshot()) ?: fail("No address field in Add People")
         driver.setText(input, emails.joinToString(", ", postfix = ","))
-        fun added(r: UiNode) = PeopleReader.chipAddresses(r).containsAll(emails) || PeopleReader.chipCount(r) >= before + emails.size
-        if (!driver.waitUntil(3_000) { added(driver.snapshot()) }) {
+        if (!driver.waitUntil(3_000) { PeopleReader.chipAddresses(driver.snapshot()).containsAll(want) }) {
             // One at a time instead.
-            for (email in emails.filter { it !in PeopleReader.chipAddresses(driver.snapshot()) }) {
+            for (email in want.filter { it !in PeopleReader.chipAddresses(driver.snapshot()) }) {
                 val field = PeopleReader.input(driver.snapshot()) ?: fail("No address field in Add People")
                 driver.setText(field, "$email,")
                 driver.waitUntil(3_000) { email in PeopleReader.chipAddresses(driver.snapshot()) }
             }
         }
-        val r = driver.snapshot()
-        if (!added(r)) fail("Couldn't add ${(emails - PeopleReader.chipAddresses(r).toSet()).joinToString()}")
-        if (!PeopleReader.chipAddresses(r).containsAll(emails)) notes += "the people's addresses weren't shown on their chips"
+        val missing = want - PeopleReader.chipAddresses(driver.snapshot()).toSet()
+        if (missing.isNotEmpty()) fail("Couldn't confirm ${missing.joinToString()} on the booking: no chip shows the address")
     }
 
+    /** The chip of [email]: its description `…<email>`, or its text being the address (as [PeopleReader.chipAddresses] reads them). */
+    private fun chipOf(root: UiNode, email: String): UiNode? =
+        root.find { it.desc?.contains("<$email>", ignoreCase = true) == true }
+            ?: root.find { it.viewId == OutlookSelectors.CONTACT_CHIP_TEXT && cleanUiText(it.text).equals(email, ignoreCase = true) }
+
     private suspend fun removePerson(email: String) {
-        val chip = driver.snapshot().find { it.desc?.contains("<$email>", ignoreCase = true) == true }
+        val r = driver.snapshot()
+        val chip = chipOf(r, email)
         if (chip == null) {
+            // Not on it as far as the chips say, unless a chip doesn't show whose it is.
+            if (PeopleReader.chipCount(r) > PeopleReader.chipAddresses(r).size) fail("Couldn't tell whether $email is on the booking: a chip doesn't show its address")
             ScanLog.i("$email isn't on the booking")
             return
         }
@@ -614,9 +674,10 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
     /**
      * Saves the form. Once Save is pressed this runs to the end even after STOP, so a booking saved in
      * Outlook is never left unrecorded by the app. Saved means: the form has gone and the calendar
-     * (a new event) or the event's details (an edited one, which are then closed) show.
+     * (a new event) or the event's details (an edited one, which are then closed) show. Anywhere
+     * else, Outlook may or may not have saved it ([SaveUncertain]; [room] is the form's room).
      */
-    private suspend fun save() = withContext(NonCancellable) {
+    private suspend fun save(room: String?) = withContext(NonCancellable) {
         val save = EventFormReader.saveButton(driver.snapshot()) ?: fail("No Save button on the form")
         driver.click(save, "Save")
         val outcome = driver.waitFor(10_000) { r ->
@@ -638,10 +699,9 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
             else -> if (EventFormReader.isForm(driver.snapshot())) {
                 fail("The form was still open 10 s after Save; nothing was saved")
             } else {
-                // Gone somewhere unexpected: it may well be saved. Not recorded, but the next run finds
-                // a saved booking in the calendar by its title and time, and won't book it again.
+                // Gone somewhere unexpected: it may well be saved. Said so, not reported as a failure.
                 ScanLog.dump("After Save", driver.snapshot().calendarOnlyDump())
-                fail("Outlook went to an unexpected screen after Save; the booking may have been saved, check Outlook")
+                throw SaveUncertain("Outlook went to an unexpected screen after Save, so it may or may not have saved: check Outlook", room)
             }
         }
     }

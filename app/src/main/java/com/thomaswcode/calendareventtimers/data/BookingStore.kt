@@ -18,6 +18,7 @@ import com.thomaswcode.calendareventtimers.util.ScanLog
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -31,16 +32,21 @@ import kotlinx.coroutines.withContext
 class BookingStore private constructor(private val context: Context) {
     private val db = AutopilotDatabase.get(context)
 
+    /** A booking's reply as the calendar has it; [room]: the room Outlook has now, when it was changed there. */
+    data class ReplyCheck(val reply: RoomReply, val room: String? = null)
+
     fun observeFrom(date: LocalDate): Flow<List<BookingEntity>> = db.bookings().observeSavedFrom(date.toString())
 
     suspend fun savedFrom(date: LocalDate): List<BookingEntity> = db.bookings().savedFrom(date.toString())
 
     suspend fun get(id: Long): BookingEntity? = db.bookings().get(id)
 
-    /** The app's bookings for these occurrences, with the rooms' latest replies. */
+    /** The app's bookings for these occurrences, with the rooms' latest replies and the booked times. */
     suspend fun known(occurrenceKeys: Collection<String>): Map<String, KnownBooking> =
         occurrenceKeys.toList().chunked(500).flatMap { db.bookings().savedForOccurrences(it) }
-            .associate { it.occurrenceKey to KnownBooking(it.room, it.roomReply) }
+            .associate { it.occurrenceKey to KnownBooking(it.room, it.roomReply, time(it.start), time(it.end)) }
+
+    private fun time(hhmm: String): LocalTime? = runCatching { LocalTime.parse(hhmm) }.getOrNull()
 
     suspend fun answers(occurrenceKeys: Collection<String>): Map<String, AnswerKind> =
         occurrenceKeys.toList().chunked(500).flatMap { db.answers().get(it) }.associate { it.occurrenceKey to it.answer }
@@ -115,10 +121,11 @@ class BookingStore private constructor(private val context: Context) {
             .mapNotNull { p -> p.name?.let { p.email to it } }.toMap()
 
     /**
-     * Reads every upcoming booking's room reply from the phone's calendar (§3.11). A while after it
-     * was saved (time for Outlook to sync it), a booking that can't be found is NOT_FOUND (deleted in
-     * Outlook, or never saved), and one found without a room is NO_ROOM (taken off in Outlook).
-     * Neither holds a room, so its event is offered again.
+     * Reads every upcoming booking's room reply from the phone's calendar (§3.11), for the booking's
+     * own room. A while after it was saved or changed (time for Outlook to sync), a booking that
+     * can't be found at its time is NOT_FOUND (deleted or moved in Outlook, or never saved), one
+     * found without a room is NO_ROOM, and one with another room set in Outlook follows that room.
+     * NOT_FOUND and NO_ROOM hold no room, so the event is offered again.
      */
     suspend fun refreshReplies(now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): Int = withContext(NonCancellable + Dispatchers.IO) {
         val calendar = CalendarStore(context)
@@ -136,11 +143,19 @@ class BookingStore private constructor(private val context: Context) {
         var changed = 0
         for (b in bookings) {
             val match = paired[b.id]
-            val reply = replyFor(b, found = match != null, room = match?.let { RoomCover.roomReply(attendees[it.eventId].orEmpty(), rooms)?.second }, now)
-            if (reply != b.roomReply || (match?.syncId != null && match.syncId != b.bookingSyncId)) {
-                db.bookings().setReply(b.id, reply, match?.syncId, now.toEpochMilli())
-                ScanLog.i("Booking ${b.id} (${b.originalTitle}, ${b.eventDate}): ${b.roomReply} → $reply")
-                changed++
+            val check = replyFor(b, found = match != null, rooms = match?.let { RoomCover.roomReplies(attendees[it.eventId].orEmpty(), rooms) }.orEmpty(), now)
+            val newSyncId = match?.syncId?.takeIf { it != b.bookingSyncId }
+            when {
+                check.room != null -> {
+                    db.bookings().setRoomFromCalendar(b.id, check.room, check.reply, match?.syncId, now.toEpochMilli())
+                    ScanLog.i("Booking ${b.id} (${b.originalTitle}, ${b.eventDate}): room ${b.room} → ${check.room} in Outlook, ${check.reply}")
+                    changed++
+                }
+                check.reply != b.roomReply || newSyncId != null -> {
+                    db.bookings().setReply(b.id, check.reply, match?.syncId, now.toEpochMilli())
+                    ScanLog.i("Booking ${b.id} (${b.originalTitle}, ${b.eventDate}): ${b.roomReply} → ${check.reply}")
+                    changed++
+                }
             }
         }
         changed
@@ -187,42 +202,55 @@ class BookingStore private constructor(private val context: Context) {
         private val SYNC_GRACE: Duration = Duration.ofMinutes(15)
 
         /**
-         * [b]'s reply, from its event in the calendar: [found] or not, and its room's reply ([room],
-         * null when the event has no room). Until Outlook has had time to sync the booking, a missing
-         * event is still WAITING, and a missing room keeps the reply it had (it may be mid-change).
+         * [b]'s reply from its event in the calendar: [found] or not, and the rooms on it with their
+         * replies. Only the booking's own room's reply counts: just after a room change the calendar
+         * may still show the old room, whose reply isn't the new one's. Until Outlook has had time to
+         * sync the booking (after it was made, or its room or reply last changed), a missing event is
+         * still WAITING and a missing room keeps the reply it had; after that, a booking without a room
+         * is NO_ROOM, and one with another room (changed in Outlook) follows it.
          */
-        fun replyFor(b: BookingEntity, found: Boolean, room: RoomReply?, now: Instant): RoomReply {
-            if (found && room != null) return room
+        fun replyFor(b: BookingEntity, found: Boolean, rooms: List<Pair<String, RoomReply>>, now: Instant): ReplyCheck {
             fun settled(since: Long) = Duration.between(Instant.ofEpochMilli(since), now) > SYNC_GRACE
-            return when {
-                !found -> if (settled(b.createdAt)) RoomReply.NOT_FOUND else RoomReply.WAITING
-                settled(maxOf(b.createdAt, b.checkedAt ?: 0L)) -> RoomReply.NO_ROOM
-                else -> b.roomReply
-            }
+            if (!found) return ReplyCheck(if (settled(b.createdAt)) RoomReply.NOT_FOUND else RoomReply.WAITING)
+            rooms.firstOrNull { RoomChoice.sameRoom(it.first, b.room) }?.let { return ReplyCheck(it.second) }
+            if (!settled(maxOf(b.createdAt, b.checkedAt ?: 0L))) return ReplyCheck(b.roomReply)
+            val other = rooms.firstOrNull() ?: return ReplyCheck(RoomReply.NO_ROOM)
+            return ReplyCheck(other.second, room = other.first)
         }
 
         fun matches(event: CalEvent, booking: BookingEntity): Boolean =
-            CalEvent.normaliseTitle(event.title) == CalEvent.normaliseTitle(booking.bookingTitle) &&
-                event.date.toString() == booking.eventDate && TriggerTime.formatHhMm(event.start) == booking.start
+            CalEvent.normaliseTitle(event.title) == CalEvent.normaliseTitle(booking.bookingTitle) && sameSlot(event, booking)
+
+        private fun sameSlot(event: CalEvent, booking: BookingEntity): Boolean =
+            event.date.toString() == booking.eventDate && TriggerTime.formatHhMm(event.start) == booking.start
 
         /**
-         * Each booking's event in the calendar, never one event for two bookings: by its own sync id
-         * once known; otherwise by title, date and start, preferring the event whose room ([roomOf]) is
-         * the booking's. (A re-booked event leaves the declined booking at the same time and title.)
+         * Each booking's event in the calendar, never one event for two bookings, and never a cancelled
+         * one. A booking whose event has been seen is followed by that event's sync id only, and only at
+         * the booking's own time: moved in Outlook, or gone, it is missing rather than given another
+         * event that looks like it. A booking not seen yet is found by title, date and start, preferring
+         * the event whose room ([roomOf]) is the booking's (a re-booked event leaves the declined booking
+         * at the same time and title), and never one another booking has seen.
          */
         fun pair(bookings: List<BookingEntity>, events: List<CalEvent>, roomOf: (CalEvent) -> String?): Map<Long, CalEvent> {
+            val live = events.filter { !it.cancelled }
+            val claimed = bookings.mapNotNull { it.bookingSyncId }.toSet()
             val used = HashSet<Long>()
             val out = HashMap<Long, CalEvent>()
             for (b in bookings) {
                 val id = b.bookingSyncId ?: continue
-                val e = events.firstOrNull { it.syncId == id && it.eventId !in used } ?: continue
+                val e = live.firstOrNull { it.syncId == id && it.eventId !in used } ?: continue
+                if (!sameSlot(e, b)) continue
                 out[b.id] = e
                 used += e.eventId
             }
             // Room matches first, for every booking; only then whatever is left, newest booking first.
+            val unseen = bookings.filter { it.bookingSyncId == null }.sortedByDescending { it.createdAt }
             for (byRoom in listOf(true, false)) {
-                for (b in bookings.filter { it.id !in out }.sortedByDescending { it.createdAt }) {
-                    val e = events.firstOrNull { it.eventId !in used && matches(it, b) && (!byRoom || RoomChoice.sameRoom(roomOf(it), b.room)) } ?: continue
+                for (b in unseen.filter { it.id !in out }) {
+                    val e = live.firstOrNull {
+                        it.eventId !in used && it.syncId !in claimed && matches(it, b) && (!byRoom || RoomChoice.sameRoom(roomOf(it), b.room))
+                    } ?: continue
                     out[b.id] = e
                     used += e.eventId
                 }

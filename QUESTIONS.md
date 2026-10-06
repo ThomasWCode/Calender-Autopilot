@@ -71,3 +71,14 @@ Fine?
 
 **Q16. Label cache lifetime.** A label read in Outlook is reused while the event's change key is
 the same, for at most **30 days**. Shorter or longer?
+
+**Q17. Keeping the screen upright** (asked for on 2026-10-06 as "turn off autorotate as it is
+working"). *Now:* the run's STOP strip asks Android for portrait, which works like auto-rotate off
+for the length of the run, with no permission and nothing to switch back (even after a crash); the
+auto-rotate setting itself is untouched. If PHONE-CHECKS A10 shows the screen still turning, the
+fallback is to switch Android's auto-rotate off during runs and back on after, which needs the
+*Modify system settings* permission (one more setup step).
+
+**Q18. People whose chip doesn't show an address.** A booking only tells people whose addresses
+Outlook shows on their chips; otherwise it fails rather than risk inviting someone else.
+*Now:* **fail** (PHONE-CHECKS B8 shows whether chips carry addresses on the phone).

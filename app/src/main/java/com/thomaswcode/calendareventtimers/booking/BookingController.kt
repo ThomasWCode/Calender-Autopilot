@@ -1,6 +1,7 @@
 package com.thomaswcode.calendareventtimers.booking
 
 import android.content.Context
+import com.thomaswcode.calendareventtimers.calendar.CalEvent
 import com.thomaswcode.calendareventtimers.calendar.CalendarStore
 import com.thomaswcode.calendareventtimers.calendar.ProviderCalendar
 import com.thomaswcode.calendareventtimers.data.AnswerKind
@@ -63,6 +64,9 @@ sealed interface RowOutcome {
     data class Booked(val room: String, val saved: Boolean, val notes: List<String>, val bookingId: Long?, val told: List<String> = emptyList()) : RowOutcome
     data class NoRoom(val missing: List<String>) : RowOutcome
     data class Failed(val reason: String) : RowOutcome
+
+    /** Outlook may or may not have saved it ([room] on the form); kept as a booking until the calendar says. */
+    data class Uncertain(val reason: String, val room: String?, val bookingId: Long?) : RowOutcome
     data object NoRoomWanted : RowOutcome
     data class NotDone(val reason: String) : RowOutcome
 }
@@ -161,8 +165,11 @@ object BookingController {
             if (stopped != null) problems += "Reading labels stopped early: $stopped"
         }
         val read = reads.mapNotNull { (t, r) -> (r as? LabelRead.Read)?.let { t to it.categories } }.toMap()
-        labels.remember(read, Instant.now())
+        // The cache proved unreliable: what it gave this run is left out too.
+        val distrusted = labels.remember(read, Instant.now()) && labelPlan.known.isNotEmpty()
+        val reused = if (distrusted) emptyMap() else labelPlan.known
         reads.values.forEach { if (it is LabelRead.Problem) problems += it.message }
+        if (distrusted) problems += LabelPass.distrusted(candidates.count { it.labelKey in labelPlan.known })
 
         val bookings = BookingStore.get(app)
         bookings.refreshReplies(now, zone)
@@ -170,7 +177,7 @@ object BookingController {
         val out = BookingPlanner.plan(
             BookingPlanner.Input(
                 events = events,
-                labels = labelPlan.known + read.mapKeys { it.key.labelKey },
+                labels = reused + read.mapKeys { it.key.labelKey },
                 attendees = attendees,
                 known = bookings.known(keys),
                 answers = bookings.answers(keys),
@@ -195,9 +202,10 @@ object BookingController {
             hiddenWithRoom = out.covered.size,
             unlabelled = out.unlabelled,
             labelProblems = problems,
-            labelsRemembered = labelPlan.remembered,
+            labelsRemembered = reused.size,
             labelsRead = read.size,
-            withDescription = shown.filter { !DescriptionText.isEmpty(descriptions[it.event.eventId]) }.map { it.key }.toSet(),
+            // Only for the time estimate: an odd description never stops the run.
+            withDescription = shown.filter { runCatching { !DescriptionText.isEmpty(descriptions[it.event.eventId]) }.getOrDefault(true) }.map { it.key }.toSet(),
         )
         ScanLog.i("Room booking: ${plan.toAsk.size} to ask about, ${plan.answeredBefore.size} answered before, ${plan.hiddenWithRoom} with a room")
         return State.Ready(plan, shown.associate { it.key to it.defaults })
@@ -242,12 +250,15 @@ object BookingController {
                 if (toBook.isNotEmpty() && calendar == null) {
                     stopped = "Couldn't read the phone's calendar to check the events again; nothing was booked."
                 } else if (toBook.isNotEmpty() && service != null && calendar != null) {
-                    val mine = myAddresses(calendar)
+                    // Grows when Outlook's form shows another of the user's addresses.
+                    val mine = myAddresses(calendar).toMutableSet()
                     val zone = ZoneId.systemDefault()
+                    // The bookings this run has saved (title, start): not cover for the run's other events.
+                    val made = HashSet<Pair<String, Instant>>()
                     // Also before Outlook opens, so a run whose events have all changed doesn't open it.
                     val stillOn = toBook.filter { c ->
                         val a = answers[c.key] ?: c.defaults
-                        val check = recheck(app, calendarStore, calendar, c, a, mine, settings.rooms, zone)
+                        val check = recheck(app, calendarStore, calendar, c, a, mine, settings.rooms, zone, made)
                         if (check is Recheck.Skip) rows[c.key] = skipped(c, a, check)
                         check is Recheck.Go
                     }
@@ -266,19 +277,28 @@ object BookingController {
                                     val text = "Booking ${i + 1} of ${stillOn.size}: ${c.event.title.trim()}"
                                     session.progress(text)
                                     _state.update { if (it is State.Booking) it.copy(step = text, done = i) else it }
-                                    val check = recheck(app, calendarStore, calendar, c, a, mine, settings.rooms, zone)
+                                    val check = recheck(app, calendarStore, calendar, c, a, mine, settings.rooms, zone, made)
                                     if (check is Recheck.Skip) {
                                         rows[c.key] = skipped(c, a, check)
                                         continue
                                     }
                                     val go = check as Recheck.Go
                                     val e = go.event
+                                    // Recorded as the occurrence is now: its key may have changed since the wizard.
+                                    val current = c.copy(event = e)
+                                    val title = BookingRules.bookingTitle(e.title)
                                     val description = withContext(Dispatchers.IO) { calendarStore.descriptions(listOf(e.eventId))[e.eventId] }
-                                    val outcome = booker.createBooking(
-                                        BookingJob(e.date, e.start, e.endTime, BookingRules.bookingTitle(e.title), go.people, description), settings, dryRun,
-                                    )
-                                    rows[c.key] = withContext(NonCancellable) { record(store, c, a, outcome, go.people, go.notes, dryRun) }
-                                    booker.accountAddress?.let { if (!dryRun) Prefs.learnMyAddress(app, it) }
+                                    val outcome = booker.createBooking(BookingJob(e.date, e.start, e.endTime, title, go.people, description), settings, dryRun)
+                                    // The form leaves out the user's own address (BookingNavigator.createBooking).
+                                    val told = go.people.filterNot { p -> booker.accountAddress?.let { p.equals(it, ignoreCase = true) } == true }
+                                    rows[c.key] = withContext(NonCancellable) { record(store, current, a, outcome, told, go.notes, dryRun) }
+                                    if ((outcome is BookingOutcome.Booked && outcome.saved) || outcome is BookingOutcome.Uncertain) {
+                                        made += CalEvent.normaliseTitle(title) to e.begin
+                                    }
+                                    booker.accountAddress?.let { address ->
+                                        mine += address.lowercase()
+                                        if (!dryRun) Prefs.learnMyAddress(app, address)
+                                    }
                                 }
                             }
                         }
@@ -310,12 +330,11 @@ object BookingController {
     /** [c] as the phone's calendar has it now ([BookingPlanner.recheck]). */
     private suspend fun recheck(
         app: Context, store: CalendarStore, calendar: ProviderCalendar, c: BookingCandidate, a: Answers,
-        mine: Set<String>, rooms: List<String>, zone: ZoneId,
+        mine: Set<String>, rooms: List<String>, zone: ZoneId, made: Set<Pair<String, Instant>>,
     ): Recheck = withContext(Dispatchers.IO) {
         val events = store.occurrencesOn(calendar, c.event.date, c.event.date, zone)
-        val ids = events.filter { it.occurrenceKey == c.key || it.eventId == c.event.eventId }.map { it.eventId }.distinct()
         val known = BookingStore.get(app).known(listOf(c.key))[c.key]
-        BookingPlanner.recheck(c, a, events, store.attendees(ids), known, rooms, mine, Instant.now())
+        BookingPlanner.recheck(c, a, events, store.attendees(events.map { it.eventId }.distinct()), known, rooms, mine, Instant.now(), made)
     }
 
     private suspend fun record(
@@ -334,6 +353,13 @@ object BookingController {
             is BookingOutcome.Failed -> {
                 if (!dryRun) store.recordAnswer(c, AnswerKind.FAILED, now)
                 RowOutcome.Failed(outcome.reason)
+            }
+            is BookingOutcome.Uncertain -> {
+                // Kept as a booking until the calendar shows whether Outlook saved it: if it didn't,
+                // the reply check finds it missing after the sync grace, and the event is offered again.
+                val id = if (!dryRun && outcome.room != null) store.recordBooking(c, outcome.room, people, now) else null
+                if (!dryRun && outcome.room == null) store.recordAnswer(c, AnswerKind.FAILED, now)
+                RowOutcome.Uncertain(outcome.reason, outcome.room, id)
             }
             is BookingOutcome.Changed -> RowOutcome.Failed("unexpected: ${outcome.what}")
         }

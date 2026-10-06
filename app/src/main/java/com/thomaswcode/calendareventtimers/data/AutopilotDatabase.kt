@@ -159,6 +159,10 @@ interface BookingDao {
     @Query("UPDATE bookings SET room = :room, roomReply = 'WAITING', checkedAt = :at WHERE id = :id")
     suspend fun setRoom(id: Long, room: String, at: Long)
 
+    /** The room was changed in Outlook: the booking follows it. */
+    @Query("UPDATE bookings SET room = :room, roomReply = :reply, bookingSyncId = COALESCE(:syncId, bookingSyncId), checkedAt = :at WHERE id = :id")
+    suspend fun setRoomFromCalendar(id: Long, room: String, reply: RoomReply, syncId: String?, at: Long)
+
     @Query("UPDATE bookings SET notified = :notified WHERE id = :id")
     suspend fun setNotified(id: Long, notified: String)
 
