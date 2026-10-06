@@ -79,6 +79,14 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
     var accountAddress: String? = null
         private set
 
+    /**
+     * Set when the last booking's outcome stands but nothing more should be done in this run (Outlook
+     * couldn't be brought back after a Save that may have worked): the caller records the outcome,
+     * then stops with this message.
+     */
+    var stopRun: String? = null
+        private set
+
     private val notes = mutableListOf<String>()
     private var missingRooms: List<String> = emptyList()
 
@@ -204,7 +212,10 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         BookingOutcome.Failed(e.message ?: "a step failed")
     } catch (e: SaveUncertain) {
         ScanLog.w("'$title': ${e.message}")
-        leaveForm(e.message)
+        // Maybe saved: that outcome is kept whatever happens next, so the run can record it. If Outlook
+        // can't be brought back (left the screen, say), the run stops after recording it.
+        val stuck = withContext(NonCancellable) { runCatching { discard() }.exceptionOrNull() }
+        if (stuck != null) stopRun = "Outlook couldn't be brought back to the calendar after Save (${stuck.message}): stopped, check Outlook."
         BookingOutcome.Uncertain(e.room, e.message ?: "Outlook didn't say whether it saved")
     } catch (e: CancellationException) {
         // STOP or the time limit: the form goes; if it can't, say so rather than just "stopped".

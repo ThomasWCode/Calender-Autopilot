@@ -292,6 +292,8 @@ object BookingController {
                                     // The form leaves out the user's own address (BookingNavigator.createBooking).
                                     val told = go.people.filterNot { p -> booker.accountAddress?.let { p.equals(it, ignoreCase = true) } == true }
                                     rows[c.key] = withContext(NonCancellable) { record(store, current, a, outcome, told, go.notes, dryRun) }
+                                    // Recorded (a booking that may have been saved isn't lost); now stop if Outlook is lost.
+                                    booker.stopRun?.let { throw ScanFailure(it) }
                                     if ((outcome is BookingOutcome.Booked && outcome.saved) || outcome is BookingOutcome.Uncertain) {
                                         made += CalEvent.normaliseTitle(title) to e.begin
                                     }
