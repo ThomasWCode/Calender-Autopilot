@@ -605,13 +605,17 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         val plain = DescriptionText.plain(raw)
         val html = if (DescriptionText.isHtml(raw)) DescriptionText.cleanHtml(raw) else null
         var ok = false
-        if (html != null && setClipboard(plain, html)) {
-            ok = driver.paste(DescriptionReader.editor(driver.snapshot()) ?: editor)
-            delay(800)
+        try {
+            if (html != null && setClipboard(plain, html)) {
+                ok = driver.paste(DescriptionReader.editor(driver.snapshot()) ?: editor)
+                delay(800)
+            }
+            if (!ok) ok = driver.setText(DescriptionReader.editor(driver.snapshot()) ?: editor, plain)
+            if (!ok && setClipboard(plain, null)) ok = driver.paste(DescriptionReader.editor(driver.snapshot()) ?: editor)
+        } finally {
+            // Also after STOP or a failure: the meeting's description never stays on the clipboard.
+            clearClipboard()
         }
-        if (!ok) ok = driver.setText(DescriptionReader.editor(driver.snapshot()) ?: editor, plain)
-        if (!ok && setClipboard(plain, null)) ok = driver.paste(DescriptionReader.editor(driver.snapshot()) ?: editor)
-        clearClipboard()
         if (!ok) fail("Couldn't put the description in")
         DescriptionReader.text(driver.snapshot())?.let { ScanLog.i("Description editor now starts '${it.take(40)}'") }
         val done = DescriptionReader.doneButton(driver.snapshot()) ?: fail("No Done on the description editor")

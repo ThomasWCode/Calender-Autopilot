@@ -89,7 +89,7 @@ object ManageController {
         val mine = BookingController.myAddresses(main)
         val last = (bookings.map { LocalDate.parse(it.eventDate) } + today.plusWeeks(CALENDAR_WEEKS)).max()
         val events = main?.let { calendar.occurrencesOn(it, today, last, zone) }.orEmpty()
-        val bookingEvents = events.filter { BookingRules.isRoomBooking(it.title) }
+        val bookingEvents = BookingStore.ownBookingEvents(events, mine)
         val attendees = calendar.attendees((events.map { it.eventId } + bookings.map { it.originalEventId }).distinct())
         val paired = BookingStore.pair(bookings, bookingEvents) { e -> RoomCover.roomReply(attendees[e.eventId].orEmpty(), rooms)?.first }
             .values.map { it.occurrenceKey }.toSet()

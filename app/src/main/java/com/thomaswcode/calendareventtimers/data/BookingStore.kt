@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import com.thomaswcode.calendareventtimers.booking.Answers
 import com.thomaswcode.calendareventtimers.booking.BookingCandidate
+import com.thomaswcode.calendareventtimers.booking.BookingController
 import com.thomaswcode.calendareventtimers.booking.BookingRules
 import com.thomaswcode.calendareventtimers.booking.KnownBooking
 import com.thomaswcode.calendareventtimers.booking.RoomChoice
@@ -55,13 +56,18 @@ class BookingStore private constructor(private val context: Context) {
         seriesKeys.toList().chunked(500).flatMap { db.seriesMemory().get(it) }
             .associate { it.seriesKey to SeriesAnswers(it.bookRoom, it.notify, ListCodec.decode(it.removed).toSet()) }
 
-    /** The answers given for these events, for next time (series) and for re-runs (occurrences). */
+    /**
+     * The answers given for these events, for next time (series) and for re-runs (occurrences). An
+     * event now answered yes loses what it got before (a "no room" in particular), so a run that
+     * stops before booking it doesn't leave the old answer standing; its booking records the new one.
+     */
     suspend fun rememberAnswers(answered: List<Pair<BookingCandidate, Answers>>, now: Instant) = withContext(NonCancellable) {
         db.seriesMemory().put(
             answered.map { (c, a) ->
                 SeriesMemoryEntity(c.event.seriesKey, a.bookRoom, a.notify, ListCodec.encode(a.removed), now.toEpochMilli())
             },
         )
+        answered.filter { it.second.bookRoom }.map { it.first.key }.chunked(500).forEach { db.answers().remove(it) }
         db.answers().put(
             answered.filter { !it.second.bookRoom }.map { (c, _) ->
                 AnswerEntity(c.key, c.event.seriesKey, c.event.date.toString(), AnswerKind.NO_ROOM_WANTED, now.toEpochMilli())
@@ -135,14 +141,20 @@ class BookingStore private constructor(private val context: Context) {
         val bookings = db.bookings().savedFrom(today.toString())
         if (bookings.isEmpty()) return@withContext 0
         val dates = bookings.map { LocalDate.parse(it.eventDate) }
-        val events = calendar.occurrencesOn(main, dates.min(), dates.max(), zone).filter { BookingRules.isRoomBooking(it.title) }
-        val attendees = calendar.attendees(events.map { it.eventId })
         Prefs.ensureLoaded(context)
         val rooms = Prefs.rooms.value
+        val events = ownBookingEvents(calendar.occurrencesOn(main, dates.min(), dates.max(), zone), BookingController.myAddresses(main))
+        val attendees = calendar.attendees(events.map { it.eventId })
         val paired = pair(bookings, events) { e -> RoomCover.roomReply(attendees[e.eventId].orEmpty(), rooms)?.first }
         var changed = 0
         for (b in bookings) {
             val match = paired[b.id]
+            // Made shorter or longer in Outlook: the booking covers what its event covers now.
+            match?.let { TriggerTime.formatHhMm(it.endTime) }?.takeIf { it != b.end }?.let { end ->
+                db.bookings().setEnd(b.id, end)
+                ScanLog.i("Booking ${b.id} (${b.originalTitle}, ${b.eventDate}): now ends at $end in Outlook")
+                changed++
+            }
             val check = replyFor(b, found = match != null, rooms = match?.let { RoomCover.roomReplies(attendees[it.eventId].orEmpty(), rooms) }.orEmpty(), now)
             val newSyncId = match?.syncId?.takeIf { it != b.bookingSyncId }
             when {
@@ -205,18 +217,27 @@ class BookingStore private constructor(private val context: Context) {
          * [b]'s reply from its event in the calendar: [found] or not, and the rooms on it with their
          * replies. Only the booking's own room's reply counts: just after a room change the calendar
          * may still show the old room, whose reply isn't the new one's. Until Outlook has had time to
-         * sync the booking (after it was made, or its room or reply last changed), a missing event is
-         * still WAITING and a missing room keeps the reply it had; after that, a booking without a room
-         * is NO_ROOM, and one with another room (changed in Outlook) follows it.
+         * sync the booking (after it was made, or its room or reply last changed), a missing event or
+         * a missing room keeps the reply it had; after that, a missing event is NOT_FOUND, a booking
+         * without a room is NO_ROOM, and one with another room (changed in Outlook) follows it.
          */
         fun replyFor(b: BookingEntity, found: Boolean, rooms: List<Pair<String, RoomReply>>, now: Instant): ReplyCheck {
-            fun settled(since: Long) = Duration.between(Instant.ofEpochMilli(since), now) > SYNC_GRACE
-            if (!found) return ReplyCheck(if (settled(b.createdAt)) RoomReply.NOT_FOUND else RoomReply.WAITING)
+            // Synced: long enough since the booking was made, or since its room or reply last changed.
+            val synced = Duration.between(Instant.ofEpochMilli(maxOf(b.createdAt, b.checkedAt ?: 0L)), now) > SYNC_GRACE
+            if (!found) return ReplyCheck(if (synced) RoomReply.NOT_FOUND else b.roomReply)
             rooms.firstOrNull { RoomChoice.sameRoom(it.first, b.room) }?.let { return ReplyCheck(it.second) }
-            if (!settled(maxOf(b.createdAt, b.checkedAt ?: 0L))) return ReplyCheck(b.roomReply)
+            if (!synced) return ReplyCheck(b.roomReply)
             val other = rooms.firstOrNull() ?: return ReplyCheck(RoomReply.NO_ROOM)
             return ReplyCheck(other.second, room = other.first)
         }
+
+        /**
+         * The user's own booking events among [events]: a colleague's invitation called "Room Booking - …"
+         * is never one of the app's bookings ([mine]: the user's addresses; Outlook's account is the
+         * organiser of the user's events).
+         */
+        fun ownBookingEvents(events: List<CalEvent>, mine: Set<String>): List<CalEvent> =
+            events.filter { BookingRules.isRoomBooking(it.title) && it.organizer?.trim()?.lowercase() in mine }
 
         fun matches(event: CalEvent, booking: BookingEntity): Boolean =
             CalEvent.normaliseTitle(event.title) == CalEvent.normaliseTitle(booking.bookingTitle) && sameSlot(event, booking)

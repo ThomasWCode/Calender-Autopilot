@@ -159,6 +159,10 @@ interface BookingDao {
     @Query("UPDATE bookings SET room = :room, roomReply = 'WAITING', checkedAt = :at WHERE id = :id")
     suspend fun setRoom(id: Long, room: String, at: Long)
 
+    /** The booking event was made shorter or longer in Outlook. */
+    @Query("UPDATE bookings SET `end` = :end WHERE id = :id")
+    suspend fun setEnd(id: Long, end: String)
+
     /** The room was changed in Outlook: the booking follows it. */
     @Query("UPDATE bookings SET room = :room, roomReply = :reply, bookingSyncId = COALESCE(:syncId, bookingSyncId), checkedAt = :at WHERE id = :id")
     suspend fun setRoomFromCalendar(id: Long, room: String, reply: RoomReply, syncId: String?, at: Long)
@@ -180,6 +184,9 @@ interface AnswerDao {
 
     @Upsert
     suspend fun put(answers: List<AnswerEntity>)
+
+    @Query("DELETE FROM answers WHERE occurrenceKey IN (:keys)")
+    suspend fun remove(keys: List<String>)
 
     @Query("DELETE FROM answers")
     suspend fun clear()

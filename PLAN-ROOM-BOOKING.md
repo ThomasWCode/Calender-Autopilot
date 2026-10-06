@@ -706,6 +706,11 @@ bookings). Where it differs from, or adds to, the sections above:
     the user's booking events it has no record of.
   - *Not done:* a fake-driver harness for testing whole booking and edit sequences (the other
     review's I09); the pure rules and readers are tested, and the sequences are in PHONE-CHECKS.md.
+- **Third round (Codex, 2026-10-06).** A booking missing from the calendar gets the same sync grace
+  after a change as one missing its room (keeping its last reply meanwhile); only the user's own
+  `Room Booking - …` events are paired with the app's bookings; a booking made shorter or longer in
+  Outlook takes its event's end, so cover follows it; answering yes clears an earlier "no room" for
+  that occurrence at once; the clipboard is cleared even when STOP lands mid-paste.
 - **The screen stays upright** during every Outlook run (the user's request, 2026-10-06): the STOP
   strip asks for portrait, which Android honours for any visible window, as if auto-rotate were off.
   Nothing to restore: the hold goes with the strip, even if the app crashes. If the run starts
