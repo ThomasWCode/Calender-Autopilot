@@ -63,6 +63,19 @@ object RoomChoice {
         return r.equals(s, ignoreCase = true) || r.startsWith("$s (", ignoreCase = true)
     }
 
+    /**
+     * Two names for one room: equal ignoring case and punctuation, or one is the other with Room
+     * Finder's note (`KS-106` and `KS-106 (EPH staff only)`). Never a prefix: `KS-103` isn't `KS-103D`.
+     */
+    fun sameRoom(a: String?, b: String?): Boolean {
+        if (a.isNullOrBlank() || b.isNullOrBlank()) return false
+        return key(a) == key(b) || matches(a, b) || matches(b, a)
+    }
+
+    /** Whether [location] (rows joined with "; ", as Outlook shows several) names [room]. */
+    fun namesRoom(location: String?, room: String?): Boolean =
+        location?.split(';')?.any { sameRoom(it.trim(), room) } == true
+
     /** "Free" / "Busy" as Outlook shows them; anything else isn't known (e.g. still loading). */
     fun status(detail: String?): RoomStatus {
         val d = detail?.trim()?.lowercase() ?: return RoomStatus.UNKNOWN

@@ -59,8 +59,8 @@ data class BookingPlan(
 
 /** What became of one event in a run. */
 sealed interface RowOutcome {
-    /** [saved] is false in a dry run. */
-    data class Booked(val room: String, val saved: Boolean, val notes: List<String>, val bookingId: Long?) : RowOutcome
+    /** [saved] is false in a dry run. [told]: the addresses put on the booking. */
+    data class Booked(val room: String, val saved: Boolean, val notes: List<String>, val bookingId: Long?, val told: List<String> = emptyList()) : RowOutcome
     data class NoRoom(val missing: List<String>) : RowOutcome
     data class Failed(val reason: String) : RowOutcome
     data object NoRoomWanted : RowOutcome
@@ -236,8 +236,23 @@ object BookingController {
             try {
                 val store = BookingStore.get(app)
                 if (!dryRun) store.rememberAnswers(shown.map { it to (answers[it.key] ?: it.defaults) }, Instant.now())
-                if (toBook.isNotEmpty() && service != null) {
-                    stopped = outcome {
+                // Each event is checked against the calendar again just before it is booked.
+                val calendarStore = CalendarStore(app)
+                val calendar = if (toBook.isEmpty()) null else withContext(Dispatchers.IO) { calendarStore.mainCalendar() }
+                if (toBook.isNotEmpty() && calendar == null) {
+                    stopped = "Couldn't read the phone's calendar to check the events again; nothing was booked."
+                } else if (toBook.isNotEmpty() && service != null && calendar != null) {
+                    val mine = myAddresses(calendar)
+                    val zone = ZoneId.systemDefault()
+                    // Also before Outlook opens, so a run whose events have all changed doesn't open it.
+                    val stillOn = toBook.filter { c ->
+                        val a = answers[c.key] ?: c.defaults
+                        val check = recheck(app, calendarStore, calendar, c, a, mine, settings.rooms, zone)
+                        if (check is Recheck.Skip) rows[c.key] = skipped(c, a, check)
+                        check is Recheck.Go
+                    }
+                    _state.update { if (it is State.Booking) it.copy(total = stillOn.size) else it }
+                    if (stillOn.isNotEmpty()) stopped = outcome {
                         OutlookSession.run(service, "Booking rooms…", hideKeyboard = true, returnTo = OutlookSession.RETURN_BOOKING, onStop = { stop() }) { session ->
                             val navigator = OutlookNavigator(service, session.driver) { s ->
                                 session.progress(s)
@@ -245,25 +260,33 @@ object BookingController {
                             }
                             val booker = BookingNavigator(navigator, service)
                             withTimeout(BOOKING_TIMEOUT_MS) {
-                                navigator.openDay(toBook.first().event.date)
-                                for ((i, c) in toBook.withIndex()) {
+                                navigator.openDay(stillOn.first().event.date)
+                                for ((i, c) in stillOn.withIndex()) {
                                     val a = answers[c.key] ?: c.defaults
-                                    val title = BookingRules.bookingTitle(c.event.title)
-                                    val text = "Booking ${i + 1} of ${toBook.size}: ${c.event.title.trim()}"
+                                    val text = "Booking ${i + 1} of ${stillOn.size}: ${c.event.title.trim()}"
                                     session.progress(text)
                                     _state.update { if (it is State.Booking) it.copy(step = text, done = i) else it }
-                                    val description = withContext(Dispatchers.IO) { CalendarStore(app).descriptions(listOf(c.event.eventId))[c.event.eventId] }
-                                    val people = c.notifyList(a).map { it.email }
+                                    val check = recheck(app, calendarStore, calendar, c, a, mine, settings.rooms, zone)
+                                    if (check is Recheck.Skip) {
+                                        rows[c.key] = skipped(c, a, check)
+                                        continue
+                                    }
+                                    val go = check as Recheck.Go
+                                    val e = go.event
+                                    val description = withContext(Dispatchers.IO) { calendarStore.descriptions(listOf(e.eventId))[e.eventId] }
                                     val outcome = booker.createBooking(
-                                        BookingJob(c.event.date, c.event.start, c.event.endTime, title, people, description), settings, dryRun,
+                                        BookingJob(e.date, e.start, e.endTime, BookingRules.bookingTitle(e.title), go.people, description), settings, dryRun,
                                     )
-                                    rows[c.key] = withContext(NonCancellable) { record(store, c, a, outcome, people, dryRun) }
+                                    rows[c.key] = withContext(NonCancellable) { record(store, c, a, outcome, go.people, go.notes, dryRun) }
                                     booker.accountAddress?.let { if (!dryRun) Prefs.learnMyAddress(app, it) }
                                 }
                             }
                         }
                     }
                 }
+            } catch (e: CancellationException) {
+                // STOP before Outlook opened (while the events were checked again).
+                stopped = STOPPED
             } catch (e: Exception) {
                 ScanLog.e("Booking run failed", e)
                 stopped = "Something went wrong: ${e.message}"
@@ -279,14 +302,30 @@ object BookingController {
         return null
     }
 
+    private fun skipped(c: BookingCandidate, a: Answers, check: Recheck.Skip): ResultRow {
+        ScanLog.w("Not booked: ${c.event.title.trim()} ${c.event.date} ${c.event.start}: ${check.reason}")
+        return ResultRow(c, a, RowOutcome.NotDone("${check.reason}; run room booking again to book it"))
+    }
+
+    /** [c] as the phone's calendar has it now ([BookingPlanner.recheck]). */
+    private suspend fun recheck(
+        app: Context, store: CalendarStore, calendar: ProviderCalendar, c: BookingCandidate, a: Answers,
+        mine: Set<String>, rooms: List<String>, zone: ZoneId,
+    ): Recheck = withContext(Dispatchers.IO) {
+        val events = store.occurrencesOn(calendar, c.event.date, c.event.date, zone)
+        val ids = events.filter { it.occurrenceKey == c.key || it.eventId == c.event.eventId }.map { it.eventId }.distinct()
+        val known = BookingStore.get(app).known(listOf(c.key))[c.key]
+        BookingPlanner.recheck(c, a, events, store.attendees(ids), known, rooms, mine, Instant.now())
+    }
+
     private suspend fun record(
-        store: BookingStore, c: BookingCandidate, a: Answers, outcome: BookingOutcome, people: List<String>, dryRun: Boolean,
+        store: BookingStore, c: BookingCandidate, a: Answers, outcome: BookingOutcome, people: List<String>, notes: List<String>, dryRun: Boolean,
     ): ResultRow {
         val now = Instant.now()
         val row = when (outcome) {
             is BookingOutcome.Booked -> {
                 val id = if (outcome.saved && !dryRun) store.recordBooking(c, outcome.room, people, now) else null
-                RowOutcome.Booked(outcome.room, outcome.saved, outcome.notes, id)
+                RowOutcome.Booked(outcome.room, outcome.saved, notes + outcome.notes, id, people)
             }
             is BookingOutcome.NoRoom -> {
                 if (!dryRun) store.recordAnswer(c, AnswerKind.NO_ROOM_FREE, now)

@@ -58,7 +58,10 @@ object RoomCover {
         }
 
         roomOf(attendees, rooms, accepted = false)?.let { return Cover.RoomOnEvent(it.first) }
-        RoomChoice.roomIn(event.location, rooms)?.let { return Cover.LocationNamesRoom(it) }
+        // Only a room that isn't an invitee: Outlook leaves a room that declined in the location.
+        RoomChoice.roomIn(event.location, rooms)
+            ?.takeIf { named -> attendees.none { listedRoom(it, rooms) == named } }
+            ?.let { return Cover.LocationNamesRoom(it) }
 
         for (other in others) {
             if (!usable(other, event, mine)) continue
@@ -97,12 +100,14 @@ object RoomCover {
         for (a in attendees) {
             if (a.status == Attendee.STATUS_DECLINED) continue
             if (accepted && a.status != Attendee.STATUS_ACCEPTED) continue
-            val listed = RoomChoice.roomIn(a.name, rooms) ?: RoomChoice.roomIn(a.email, rooms)
-            val room = listed ?: if (a.isResource) (a.name ?: a.email?.substringBefore('@') ?: "a room") else null
+            val room = listedRoom(a, rooms) ?: if (a.isResource) (a.name ?: a.email?.substringBefore('@') ?: "a room") else null
             if (room != null) return room to a.status
         }
         return null
     }
+
+    /** The room from the list that invitee [a] is, by name or address. */
+    private fun listedRoom(a: Attendee, rooms: List<String>): String? = RoomChoice.roomIn(a.name, rooms) ?: RoomChoice.roomIn(a.email, rooms)
 
     /** A booking event's room and its reply, from its invitees; null when it has no room. */
     fun roomReply(attendees: List<Attendee>, rooms: List<String>): Pair<String, RoomReply>? {

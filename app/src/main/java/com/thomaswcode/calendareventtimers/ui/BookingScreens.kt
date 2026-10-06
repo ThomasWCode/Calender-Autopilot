@@ -246,6 +246,7 @@ private fun WeekStatus(bookings: List<BookingEntity>, monday: LocalDate) {
                 "${list.size} booked",
                 list.count { it.roomReply == RoomReply.WAITING }.takeIf { it > 0 }?.let { "$it waiting for a reply" },
                 list.count { it.roomReply == RoomReply.DECLINED }.takeIf { it > 0 }?.let { "$it declined" },
+                list.count { it.roomReply == RoomReply.NO_ROOM }.takeIf { it > 0 }?.let { "$it without a room" },
             ).joinToString(" · ")
             Text("$label: $text", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -362,6 +363,7 @@ private fun CandidateStep(
                         Text("${it.room} is booked for ${it.from}–${it.to} (“${it.title}”)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
                     }
                     if (candidate.roomDeclined) Text("The room declined the last booking for this event.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    if (candidate.roomRemoved) Text("The last booking for this event has no room any more.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     if (candidate.remembered) Text("Answers as last time", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -628,11 +630,12 @@ private fun ResultCard(row: ResultRow, replies: Map<Long, RoomReply>) {
                 reply == RoomReply.TENTATIVE -> "Tentative (needs approval)"
                 reply == RoomReply.DECLINED -> "Declined: try another room in Manage bookings"
                 reply == RoomReply.NOT_FOUND -> "not found in the calendar"
+                reply == RoomReply.NO_ROOM -> "the room is no longer on it: change it in Manage bookings"
                 else -> "waiting for the room's reply…"
             }
-            val notified = c.notifyList(row.answers).size.takeIf { it > 0 }?.let { " · told $it" } ?: ""
+            val notified = o.told.size.takeIf { it > 0 }?.let { " · told $it" } ?: ""
             Triple("✓", "${o.room} · $status$notified" + o.notes.joinToString("") { "\n($it)" },
-                if (reply == RoomReply.DECLINED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                if (reply == RoomReply.DECLINED || reply == RoomReply.NO_ROOM) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
         }
         is RowOutcome.NoRoom -> Triple("✗", "No room in your list was free", MaterialTheme.colorScheme.error)
         is RowOutcome.Failed -> Triple("!", "Not booked: ${o.reason}", MaterialTheme.colorScheme.error)

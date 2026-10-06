@@ -238,7 +238,8 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         val read = DetailsReader.read(details)
         ScanLog.i("Opened '${read.title}' at ${read.start} in ${read.location} ${DetailsReader.locationResponse(details) ?: ""}")
         if (!FormText.sameText(read.title, title) || (read.start != null && read.start != start)) return Candidate.NO
-        if (room == null || read.location?.contains(room, ignoreCase = true) == true) return Candidate.EXACT
+        // One location row must be the room itself: KS-103 must not pass for KS-103D.
+        if (room == null || read.locations.any { RoomChoice.sameRoom(it, room) }) return Candidate.EXACT
         return Candidate.OTHER_ROOM
     }
 
@@ -441,7 +442,7 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         driver.click(done, "location Done")
         waitForForm("Add Location didn't close")
         val shown = EventFormReader.location(driver.snapshot())
-        if (shown == null || !(shown.equals(name, true) || shown.contains(name, true))) fail("The form's location reads '$shown', not $name")
+        if (!RoomChoice.namesRoom(shown, name)) fail("The form's location reads '$shown', not $name")
         return name
     }
 
@@ -604,7 +605,7 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
             "title '${EventFormReader.title(f)}'".takeIf { !FormText.sameText(EventFormReader.title(f), title) },
             "date ${formDate(f, date)}".takeIf { formDate(f, date) != date },
             "time ${formTimes(f)}".takeIf { formTimes(f) != (start to end) },
-            "location '${EventFormReader.location(f)}'".takeIf { EventFormReader.location(f)?.contains(room, ignoreCase = true) != true },
+            "location '${EventFormReader.location(f)}'".takeIf { !RoomChoice.namesRoom(EventFormReader.location(f), room) },
             "alert '${EventFormReader.alertRow(f)?.value}'".takeIf { !EventFormReader.alertRow(f)?.value.equals(OutlookSelectors.TEXT_ALERT_NONE, ignoreCase = true) },
         )
         if (wrong.isNotEmpty()) fail("Before saving, the form had the wrong ${wrong.joinToString()}")
@@ -647,9 +648,13 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
 
     // ---- Leaving ----
 
-    /** Leaves the form without saving, from wherever in it Outlook is. */
+    /**
+     * Leaves the form without saving, from wherever in it Outlook is. Returns only once Outlook's
+     * calendar shows again; otherwise this booking fails, so a dry run or a booking without a free
+     * room is never reported as done while a filled-in form is still open.
+     */
     private suspend fun discard() {
-        repeat(10) {
+        repeat(MAX_DISCARD_STEPS) {
             val r = driver.snapshot()
             val discardButton = PromptReader.discardButton(r)
             when {
@@ -666,14 +671,21 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
                 EventFormReader.isForm(r) -> EventFormReader.cancelButton(r)?.let { driver.click(it, "Cancel") } ?: driver.back()
                 CalendarReader.isCalendar(r) && !DetailsReader.isDetails(r) -> return
                 DetailsReader.isDetails(r) -> CalendarReader.closeButton(r)?.let { driver.click(it, "Close") } ?: driver.back()
+                !driver.outlookInFront() -> fail("Outlook left the screen before the form was discarded; check Outlook for an unsaved event")
+                // Nothing readable yet (a screen changing): look again.
+                r.children.isEmpty() -> Unit
                 else -> {
+                    // A screen the app doesn't know, such as a dialog over the form: Back closes most.
                     ScanLog.dump("Unknown screen while discarding", r.calendarOnlyDump())
-                    return
+                    driver.back()
                 }
             }
             delay(500)
         }
-        ScanLog.w("Couldn't get out of the event form cleanly")
+        val r = driver.snapshot()
+        if (CalendarReader.isCalendar(r) && !DetailsReader.isDetails(r)) return
+        ScanLog.dump("Couldn't leave the event form", r.calendarOnlyDump())
+        fail("Couldn't leave the event form; check Outlook for an unsaved event")
     }
 
     private suspend fun discardQuietly() {
@@ -685,6 +697,7 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
     private companion object {
         const val MAX_WHEEL_STEPS = 80
         const val MAX_ROOM_PAGES = 8
+        const val MAX_DISCARD_STEPS = 10
         val DELETE_CONFIRMATIONS = setOf("delete", "yes", "ok", "send", "cancel event", "cancel meeting", "delete event")
         val REMOVE = Regex("""\b(remove|delete)\b""", RegexOption.IGNORE_CASE)
     }

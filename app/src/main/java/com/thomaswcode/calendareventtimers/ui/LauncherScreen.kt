@@ -156,5 +156,7 @@ private fun bookingSummary(bookings: List<BookingEntity>, monday: LocalDate): St
     parts += if (nextWeek.isEmpty()) "Next week: not booked yet" else "Next week: ${nextWeek.size} booked"
     val declined = (thisWeek + nextWeek).count { it.roomReply == RoomReply.DECLINED }
     if (declined > 0) parts += "$declined declined"
+    val roomless = (thisWeek + nextWeek).count { it.roomReply == RoomReply.NO_ROOM }
+    if (roomless > 0) parts += "$roomless without a room"
     return parts.joinToString(" · ")
 }
