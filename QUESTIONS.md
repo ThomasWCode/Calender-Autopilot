@@ -14,8 +14,8 @@ offered?
 `RoomCover.cover`, the `LocationNamesRoom` case.
 
 **Q2. Deleting a booking in Manage bookings** — should later runs ask about that event again?
-*Now:* **no**: deleting counts as answering "no room" for that occurrence, so it shows only under
-"Answered before" in the summary, where it can be switched back. `ManageController.apply`.
+**Answered 2026-10-06: yes.** Deleting is temporary: nothing about it is remembered, and the event is
+offered again, like any event without a room. `ManageController.apply`.
 
 **Q3. Other Outlook calendars.** The engine reads only Outlook's main calendar ("Calendar
 (eiderwhi@…)"). Events of other calendars Outlook may show in its Day view (e.g. the "TB Modelling

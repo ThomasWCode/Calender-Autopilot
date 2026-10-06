@@ -135,7 +135,8 @@ fun ManageBookingsScreen(snackbar: SnackbarHostState, onBack: () -> Unit) {
             text = {
                 Text(
                     "“${m.booking.bookingTitle}” on ${m.booking.eventDate} at ${m.booking.start}. Outlook sends a cancellation to ${m.booking.room ?: "the room"}" +
-                        if (m.notified.isEmpty()) "." else " and to ${m.notified.joinToString { it.display }}.",
+                        (if (m.notified.isEmpty()) "." else " and to ${m.notified.joinToString { it.display }}.") +
+                        " The event will be offered for a room again next time.",
                 )
             },
             confirmButton = { TextButton(onClick = { deleting = null; act { ManageController.delete(context, m.booking) } }) { Text("Delete") } },

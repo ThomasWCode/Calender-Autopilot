@@ -461,7 +461,8 @@ return first Free room of prefs in seen, else NONE
   list*. Stored in preferences as a JSON list.
 - Room Finder building: `KS-Rooms`.
 - *Use the Recent list for the first-choice room* (on).
-- Memory: *Forget remembered answers*; *Read all labels again next time*.
+- Memory: what is remembered, counted; **Clear memory** (everything); *Forget remembered answers*;
+  *Read all labels again next time*.
 - My addresses (learnt, editable): left out of notify lists.
 
 The LSHTM domains and Mon–Fri are fixed in code (decided above), not settings.
@@ -647,8 +648,12 @@ bookings). Where it differs from, or adds to, the sections above:
 - **Events with a room are hidden** (§3.5, changed by the user). "Another event with a room" counts
   only when the user organised it (their `call` / `Room booking for …` events): a colleague's seminar
   in a room at the same time doesn't hide the user's meeting (found in review).
-- **Deleting a booking** in Manage bookings records "no room" for that occurrence, so later runs
-  list it under "Answered before" instead of asking again (QUESTIONS.md Q2).
+- **Deleting a booking** in Manage bookings is temporary: nothing about it is remembered, so later
+  runs offer the event again (the user's answer to QUESTIONS.md Q2, 2026-10-06).
+- **Clear memory** (Settings, 2026-10-06): one button forgets everything remembered (answers per
+  meeting and per event, labels read in Outlook, people's names), with the counts shown above it and
+  a confirmation; bookings, alarms and settings stay. Forgetting only the answers or only the labels
+  is still offered.
 - **Dry runs remember nothing**: no bookings, answers or series memory are written.
 - **Events declined by the user** are left out of both features (QUESTIONS.md Q4), and the engine
   reads Outlook's main calendar only (Q3); the Day view is compared with the provider on every day

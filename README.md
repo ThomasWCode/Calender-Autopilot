@@ -94,10 +94,13 @@ Alarm labels read `Title (Label) @ Location`, with meeting links shortened: `Kri
 - The **results** say what each event got: booked (with the room's reply as it arrives: *Reserved*,
   *Declined*…), no free room, failed. Rooms not in Room Finder are named.
 - **⋮ → Manage bookings**: your bookings from today on, with warnings (room declined, event moved or
-  gone); per booking *Change room*, *Edit people*, *Delete booking* (Outlook sends the cancellations).
+  gone); per booking *Change room*, *Edit people*, *Delete booking* (Outlook sends the cancellations;
+  nothing about the deletion is remembered, so the event is offered again next time).
 - **⋮ → Dry run**: every booking is filled in in Outlook, room included, then discarded.
 - **Settings**: the rooms, in order (add, remove, reorder, reset to the 25 KS rooms); Room Finder's
-  building; the Recent-list shortcut; your own addresses; forgetting remembered answers or labels.
+  building; the Recent-list shortcut; your own addresses; and **Clear memory**, which forgets every
+  remembered answer, label and name (bookings, alarms and settings stay), or only the answers or the
+  labels.
 
 While a booking runs, the description is pasted through the clipboard, which is cleared afterwards
 (anything you had copied is gone).

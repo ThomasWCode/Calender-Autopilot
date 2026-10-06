@@ -18,6 +18,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -34,10 +36,14 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -70,6 +76,11 @@ fun SettingsScreen(snackbar: SnackbarHostState, onBack: () -> Unit) {
     var newRoom by rememberSaveable { mutableStateOf("") }
     var buildingText by rememberSaveable(building) { mutableStateOf(building) }
     var newAddress by rememberSaveable { mutableStateOf("") }
+    var confirmClear by rememberSaveable { mutableStateOf(false) }
+    // What the app remembers, counted again after each memory action.
+    var memoryVersion by remember { mutableIntStateOf(0) }
+    var memory by remember { mutableStateOf<BookingStore.MemoryCounts?>(null) }
+    LaunchedEffect(memoryVersion) { memory = BookingStore.get(context).memoryCounts() }
 
     fun setRooms(list: List<String>) = Prefs.setRooms(context, list)
 
@@ -212,27 +223,67 @@ fun SettingsScreen(snackbar: SnackbarHostState, onBack: () -> Unit) {
             item { Text("Memory", style = MaterialTheme.typography.titleMedium) }
             item {
                 Text(
-                    "The app remembers your answers for meetings that come back, what each event got, and the labels it has read in Outlook, so later runs need fewer presses and less time in Outlook.",
+                    "The app remembers your answers for meetings that come back, what each event got, the labels it has read in Outlook and people's names, so later runs need fewer presses and less time in Outlook.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            item { Text(memorySummary(memory), style = MaterialTheme.typography.bodyMedium) }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { confirmClear = true }, enabled = memory?.isEmpty == false) { Text("Clear memory") }
+                    Text("Or only part of it:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedButton(onClick = {
                         scope.launch {
                             withContext(Dispatchers.IO) { BookingStore.get(context).forgetAnswers() }
+                            memoryVersion++
                             snackbar.showNow("Remembered answers forgotten")
                         }
                     }) { Text("Forget remembered answers") }
                     OutlinedButton(onClick = {
                         scope.launch {
                             withContext(Dispatchers.IO) { LabelPass(context).forgetAll() }
+                            memoryVersion++
                             snackbar.showNow("Every label will be read in Outlook again next time")
                         }
                     }) { Text("Read all labels again next time") }
                 }
             }
         }
+    }
+
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("Clear memory?") },
+            text = {
+                Text(
+                    "The app forgets your answers for each meeting and each event, the labels it has read in Outlook and people's names. " +
+                        "Your bookings, alarms and settings stay. The next runs ask about every event again and read each label in Outlook again, so they take longer.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClear = false
+                    scope.launch {
+                        BookingStore.get(context).clearMemory()
+                        memoryVersion++
+                        snackbar.showNow("Memory cleared")
+                    }
+                }) { Text("Clear") }
+            },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Keep") } },
+        )
+    }
+}
+
+/** "Remembered now: answers for 12 meetings and 30 events, the labels of 40 events and 85 names." */
+private fun memorySummary(c: BookingStore.MemoryCounts?): String {
+    fun n(count: Int, one: String, many: String) = if (count == 1) "1 $one" else "$count $many"
+    return when {
+        c == null -> "Counting what is remembered…"
+        c.isEmpty -> "Nothing is remembered at the moment."
+        else -> "Remembered now: answers for ${n(c.meetings, "meeting", "meetings")} and ${n(c.events, "event", "events")}, " +
+            "the labels of ${n(c.labels, "event", "events")} and ${n(c.people, "name", "names")}."
     }
 }
 
