@@ -89,6 +89,15 @@ object RoomCover {
 
     private fun isMine(e: CalEvent, mine: Set<String>): Boolean = e.organizer?.trim()?.lowercase() in mine
 
+    /**
+     * The meeting's own booking ([known]), still holding its room but for only part of [event]'s
+     * time (the meeting was made longer since): known to the app even before the calendar shows it.
+     */
+    fun partialFromKnown(known: KnownBooking?, event: CalEvent): PartialCover? {
+        if (known == null || !holds(known.reply) || known.covers(event)) return null
+        return PartialCover(BookingRules.bookingTitle(event.title), known.room ?: return null, known.start ?: return null, known.end ?: return null)
+    }
+
     /** The first event with an accepted room overlapping part of [event]'s time. */
     fun partial(
         event: CalEvent, others: List<CalEvent>, attendeesOf: (CalEvent) -> List<Attendee>, rooms: List<String>, zone: ZoneId, mine: Set<String>,

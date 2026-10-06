@@ -146,8 +146,11 @@ class BookingStore private constructor(private val context: Context) {
         val events = ownBookingEvents(calendar.occurrencesOn(main, dates.min(), dates.max(), zone), BookingController.myAddresses(main))
         val attendees = calendar.attendees(events.map { it.eventId })
         val paired = pair(bookings, events) { e -> RoomCover.roomReply(attendees[e.eventId].orEmpty(), rooms)?.first }
+        val unsure = unsure(bookings, events, paired)
         var changed = 0
         for (b in bookings) {
+            // Its event is among several that look alike: nothing is decided until one tells them apart.
+            if (b.id in unsure) continue
             val match = paired[b.id]
             // Made shorter or longer in Outlook: the booking covers what its event covers now.
             match?.let { TriggerTime.formatHhMm(it.endTime) }?.takeIf { it != b.end }?.let { end ->
@@ -249,9 +252,11 @@ class BookingStore private constructor(private val context: Context) {
          * Each booking's event in the calendar, never one event for two bookings, and never a cancelled
          * one. A booking whose event has been seen is followed by that event's sync id only, and only at
          * the booking's own time: moved in Outlook, or gone, it is missing rather than given another
-         * event that looks like it. A booking not seen yet is found by title, date and start, preferring
-         * the event whose room ([roomOf]) is the booking's (a re-booked event leaves the declined booking
-         * at the same time and title), and never one another booking has seen.
+         * event that looks like it. A booking not seen yet is found by title, date and start, never in
+         * an event another booking has seen: the one booking and the one event of that title and time;
+         * or, among several (a re-booked event leaves the declined booking at the same time and title),
+         * only a booking and an event that fit each other alone by room ([roomOf]) and end. Anything
+         * less clear stays unpaired ([unsure]) rather than tie two bookings to each other's events.
          */
         fun pair(bookings: List<BookingEntity>, events: List<CalEvent>, roomOf: (CalEvent) -> String?): Map<Long, CalEvent> {
             val live = events.filter { !it.cancelled }
@@ -265,18 +270,32 @@ class BookingStore private constructor(private val context: Context) {
                 out[b.id] = e
                 used += e.eventId
             }
-            // Room matches first, for every booking; only then whatever is left, newest booking first.
-            val unseen = bookings.filter { it.bookingSyncId == null }.sortedByDescending { it.createdAt }
-            for (byRoom in listOf(true, false)) {
-                for (b in unseen.filter { it.id !in out }) {
-                    val e = live.firstOrNull {
-                        it.eventId !in used && it.syncId !in claimed && matches(it, b) && (!byRoom || RoomChoice.sameRoom(roomOf(it), b.room))
-                    } ?: continue
-                    out[b.id] = e
-                    used += e.eventId
+            val free = live.filter { it.eventId !in used && it.syncId !in claimed }
+            fun fits(e: CalEvent, b: BookingEntity) = RoomChoice.sameRoom(roomOf(e), b.room) && TriggerTime.formatHhMm(e.endTime) == b.end
+            val unseen = bookings.filter { it.bookingSyncId == null }
+            for (group in unseen.groupBy { Triple(CalEvent.normaliseTitle(it.bookingTitle), it.eventDate, it.start) }.values) {
+                val candidates = free.filter { matches(it, group.first()) }
+                if (group.size == 1 && candidates.size == 1) {
+                    out[group.single().id] = candidates.single()
+                    continue
+                }
+                for (b in group) {
+                    val e = candidates.filter { fits(it, b) }.singleOrNull() ?: continue
+                    if (group.count { fits(e, it) } == 1) out[b.id] = e
                 }
             }
             return out
+        }
+
+        /**
+         * Bookings not seen yet and left unpaired although events of their title and time are there:
+         * which is theirs isn't clear (yet), so their replies are left as they are.
+         */
+        fun unsure(bookings: List<BookingEntity>, events: List<CalEvent>, paired: Map<Long, CalEvent>): Set<Long> {
+            val claimed = bookings.mapNotNull { it.bookingSyncId }.toSet()
+            val used = paired.values.map { it.eventId }.toSet()
+            val free = events.filter { !it.cancelled && it.eventId !in used && it.syncId !in claimed }
+            return bookings.filter { b -> b.bookingSyncId == null && b.id !in paired && free.any { matches(it, b) } }.map { it.id }.toSet()
         }
 
         // Holds the application context only (see get()), which lives as long as the process.

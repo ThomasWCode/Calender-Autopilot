@@ -192,7 +192,8 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
     /**
      * Runs one booking's steps. A failed step fails only this booking, once its form is gone; if the
      * form can't be left, the run stops (ScanFailure), so nothing else is typed into it. STOP
-     * (cancellation) still leaves Outlook without a half-made event. Navigation failures end the run.
+     * (cancellation) discards the form too, and if it can't, ends with a ScanFailure saying so.
+     * Navigation failures end the run.
      */
     private suspend fun withFormGuard(title: String, block: suspend () -> BookingOutcome): BookingOutcome = try {
         block()
@@ -206,8 +207,9 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         leaveForm(e.message)
         BookingOutcome.Uncertain(e.room, e.message ?: "Outlook didn't say whether it saved")
     } catch (e: CancellationException) {
-        withContext(NonCancellable) { discardQuietly() }
-        throw e
+        // STOP or the time limit: the form goes; if it can't, say so rather than just "stopped".
+        val stuck = withContext(NonCancellable) { runCatching { discard() }.exceptionOrNull() } ?: throw e
+        throw ScanFailure("Stopped, but Outlook's form couldn't be closed (${stuck.message}): check Outlook for an unsaved event.")
     }
 
     /** Out of the form without saving, or the run stops: anything more could go into a form still open. */
@@ -750,10 +752,6 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         if (CalendarReader.isCalendar(r) && !DetailsReader.isDetails(r)) return
         ScanLog.dump("Couldn't leave the event form", r.calendarOnlyDump())
         fail("Couldn't leave the event form; check Outlook for an unsaved event")
-    }
-
-    private suspend fun discardQuietly() {
-        runCatching { discard() }.onFailure { ScanLog.w("Discarding the form failed: ${it.message}") }
     }
 
     private fun fail(message: String): Nothing = throw BookingStepFailure(message)

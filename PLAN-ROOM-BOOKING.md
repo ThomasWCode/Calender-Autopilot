@@ -711,6 +711,13 @@ bookings). Where it differs from, or adds to, the sections above:
   `Room Booking - …` events are paired with the app's bookings; a booking made shorter or longer in
   Outlook takes its event's end, so cover follows it; answering yes clears an earlier "no room" for
   that occurrence at once; the clipboard is cleared even when STOP lands mid-paste.
+- **Fourth round (Codex, 2026-10-06).** STOP with a form that can't be closed says so (the run's
+  tidy-up no longer turns that into a plain "stopped": it leaves the main thread through a
+  non-cancellable step, tested); new bookings that look alike (title, time, room, end) are left
+  unpaired until something tells them apart, instead of being tied by list order; Day-view
+  entries are matched to titles as titles are compared (invisible marks, non-breaking spaces,
+  case); a meeting's own booking for part of its time shows as a note even before the calendar
+  has it; Manage bookings finds a meeting again by its row and time after its sync id changes.
 - **The screen stays upright** during every Outlook run (the user's request, 2026-10-06): the STOP
   strip asks for portrait, which Android honours for any visible window, as if auto-rotate were off.
   Nothing to restore: the hold goes with the strip, even if the app crashes. If the run starts
