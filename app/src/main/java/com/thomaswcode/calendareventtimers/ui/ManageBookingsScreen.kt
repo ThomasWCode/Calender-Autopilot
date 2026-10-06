@@ -7,10 +7,13 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
@@ -48,6 +51,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.thomaswcode.calendareventtimers.booking.ManageController
 import com.thomaswcode.calendareventtimers.booking.ManagedBooking
 import com.thomaswcode.calendareventtimers.data.RoomReply
+import com.thomaswcode.calendareventtimers.util.Prefs
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -63,6 +67,7 @@ fun ManageBookingsScreen(snackbar: SnackbarHostState, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by ManageController.state.collectAsStateWithLifecycle()
+    val dryRun by Prefs.dryRun.collectAsStateWithLifecycle()
     var bookings by remember { mutableStateOf<List<ManagedBooking>?>(null) }
     var reloads by remember { mutableIntStateOf(0) }
     LifecycleResumeEffect(Unit) {
@@ -121,7 +126,9 @@ fun ManageBookingsScreen(snackbar: SnackbarHostState, onBack: () -> Unit) {
             }
             item {
                 Text(
-                    "Each change opens Outlook briefly. Deleting sends cancellations to the room and to the people told.",
+                    "Each change opens Outlook briefly. Deleting sends cancellations to the room and to the people told." +
+                        // Dry run is for booking runs; nothing here would make sense half done.
+                        if (dryRun) " Dry run doesn't apply here: these changes are real." else "",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp),
                 )
             }
@@ -150,7 +157,8 @@ fun ManageBookingsScreen(snackbar: SnackbarHostState, onBack: () -> Unit) {
             onDismissRequest = { editing = null },
             title = { Text("People told") },
             text = {
-                Column {
+                // Scrolls, so a long invitee list keeps every person and the buttons reachable.
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                     if (m.offered.isEmpty()) Text("Nobody at LSHTM was invited to “${m.booking.originalTitle}”.")
                     m.offered.forEach { p ->
                         val checked = p.email in keep
@@ -188,15 +196,8 @@ private fun BookingCard(
     onForget: () -> Unit,
 ) {
     val b = m.booking
-    val reply = when (b.roomReply) {
-        RoomReply.RESERVED -> "Reserved"
-        RoomReply.TENTATIVE -> "Tentative"
-        RoomReply.DECLINED -> "Declined"
-        RoomReply.WAITING -> "Waiting for a reply"
-        RoomReply.NOT_FOUND -> "Not in the calendar"
-        RoomReply.NO_ROOM -> "No room on it"
-    }
-    val trouble = b.roomReply == RoomReply.DECLINED || b.roomReply == RoomReply.NOT_FOUND || b.roomReply == RoomReply.NO_ROOM
+    val reply = ReplyText.short(b.roomReply)
+    val trouble = ReplyText.needsAttention(b.roomReply)
     OutlinedCard(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -209,12 +210,15 @@ private fun BookingCard(
                 if (m.notified.isNotEmpty()) {
                     Text(m.notified.joinToString { it.display }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                if (m.fromCalendar) {
+                    Text("Found in your calendar; the app has no record of it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 m.warnings.forEach { Text("⚠ $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             }
             var menu by remember { mutableStateOf(false) }
             IconButton(onClick = { menu = true }, enabled = enabled) { Icon(Icons.Default.MoreVert, contentDescription = "Change ${b.originalTitle}'s booking") }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                if (b.roomReply == RoomReply.NOT_FOUND) {
+                if (b.roomReply == RoomReply.NOT_FOUND && !m.fromCalendar) {
                     DropdownMenuItem(text = { Text("Forget it") }, onClick = { menu = false; onForget() })
                 } else {
                     DropdownMenuItem(text = { Text("Change room") }, onClick = { menu = false; onChangeRoom() })

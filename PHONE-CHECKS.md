@@ -43,6 +43,7 @@ Git Bash rewrites `/sdcard/...` paths: set `MSYS_NO_PATHCONV=1` for `adb shell` 
 | A7 | Calendar access refused (App info → Permissions → deny), scan | Falls back to the old whole-day scan; works as before |
 | A8 | Time for A2 / A3 | Seconds with Outlook on screen |
 | A9 | Two **test events** (no invitees, deleted after) with the same title and start on one day: one Moveable, the other no label; scan | Both blocks opened; problem `…different labels, and Outlook doesn't show which is which`; nothing remembered for them. Then both Moveable: both read, one label. Note how Outlook orders the two blocks |
+| A10 | Auto-rotate **on**; start a scan, then turn the phone sideways while Outlook is being driven | The screen stays portrait until the strip goes, then turns as usual. Start a scan with the phone sideways: log `Turning the screen upright for the run`, the screen turns first, the strip fits the status bar. If the screen still turns mid-run, the fallback is QUESTIONS.md Q17 |
 
 ## B. Probes on Outlook's form (nothing saved)
 
@@ -63,7 +64,7 @@ adb shell am broadcast -a com.thomaswcode.calendareventtimers.DEBUG_PROBE --es p
 | B5 | Same | `wheel_step --ei wheel 1 --es dir forward` (scroll) and again with `--es how click` | Which moves the hour by one; `8 → 9`. Record time per step |
 | B6 | Hour at 23 | `wheel_step --ei wheel 1` | Does it wrap to 0? (`stepWheel` takes the long way if not) |
 | B7 | Same | `wheel_text --ei wheel 2 --es text 35` | Does `ACTION_SET_TEXT` set a minute **and keep it after Done**? If yes, the wheels could be set in one action each (faster) |
-| B8 | Add People | `people --es text "nobody@example.com, nobody2@example.com,"` | Two chips from one action? Their addresses (`chips 2: [...]`). Close with **✕**, not Done |
+| B8 | Add People | `people --es text "nobody@example.com, nobody2@example.com,"` | Two chips from one action? Their addresses (`chips 2: [...]`). **Each chip must show its address** (description `<…>` or text): a booking that tells people fails otherwise, by design. Close with **✕**, not Done |
 | B9 | Description editor | `paste` | `ok=true`; does the editor keep bold and the link? Then `set_description` (plain fallback). Record what the **form's** Description row shows after Done |
 | B10 | Alert sheet | `screen` | `Alert sheet open` |
 | B11 | Location → Room Finder → KS-Rooms | `screen` | Rooms with `FREE/BUSY`. Note any **other status text** (loading, "Free until …"): `RoomChoice.status` treats it as unknown = busy |
@@ -106,6 +107,8 @@ draft, which is discarded; nothing is sent). Confirm it stays a draft (C2).
 | D5 | Edit people (needs a consenting colleague) | Adding works by typing; **removing** a person: what tapping a chip offers (`removePerson` looks for Remove/Delete) |
 | D6 | Notify one consenting colleague | They receive `Room Booking - …` with the room; their reply doesn't disturb the app |
 | D7 | Take the room off a booking in Outlook (D1's, before deleting it) | 15 minutes after the change: Manage bookings says *No room on it* with a warning, and the event is offered again |
+| D8 | D1's booking: Manage bookings → Change room, and press STOP just after Save | Results say what changed; Manage bookings shows the new room (recorded before the run tidied up) |
+| D9 | Two bookings with the same title, time and room (e.g. D1 made twice), then Delete one in Manage bookings | Nothing is deleted: *2 events at … are '…', and Outlook doesn't show which is the booking* |
 
 ## E. Data to collect for the tests
 
@@ -135,4 +138,8 @@ Save as fixtures (`app/src/test/resources/fixtures/booking/`) with uiautomator d
 | The booking event shows in the provider under its title at the original's start | `BookingStore.matches`, `BookingStore.pair`, reply check | D2 |
 | After saving an **edited** event Outlook shows its details (the app closes them) or the calendar | `BookingNavigator.save` | D3: if it lands elsewhere, the change is reported as "may have been saved" |
 | Closed sub-screens (Add Location, Room Finder, Add People, picker) leave the tree, or at least stop being visible | the `visibleId` checks in `BookingReaders.kt`, `onlyForm` | every step would time out with "…didn't close" |
+| Chips show their person's address | `typePeople`, `removePerson` (strict) | B8: bookings that tell people fail (Q18) |
+| The details screen's time reads "HH:MM to HH:MM, duration: …" (gives the end) | `DetailsReader.read` → `end` | without it, Manage bookings tells events apart by title, start and room only |
+| The form's account row reads "Name, address" | `EventFormReader.accountAddress` | no account check (logged); a non-LSHTM account would only be refused when read |
+| A visible overlay asking for portrait holds the screen upright | `ScanOverlay` (`screenOrientation`) | A10: Q17's fallback |
 | Opening a booking for Change room / Edit people / Delete finds the right one: exact title, start, recorded room | `BookingNavigator.openForEdit` | D3–D5, also with two bookings at the same time (a re-booking after a decline) |

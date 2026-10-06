@@ -44,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.thomaswcode.calendareventtimers.booking.RoomCover
 import com.thomaswcode.calendareventtimers.data.AlarmEntity
 import com.thomaswcode.calendareventtimers.data.AlarmStore
 import com.thomaswcode.calendareventtimers.data.BookingEntity
@@ -152,11 +153,13 @@ private fun bookingSummary(bookings: List<BookingEntity>, monday: LocalDate): St
     val thisWeek = bookings.filter { inWeek(it, monday) }
     val nextWeek = bookings.filter { inWeek(it, monday.plusWeeks(1)) }
     val parts = mutableListOf<String>()
-    if (thisWeek.isNotEmpty()) parts += "This week: ${thisWeek.size} booked"
-    parts += if (nextWeek.isEmpty()) "Next week: not booked yet" else "Next week: ${nextWeek.size} booked"
-    val declined = (thisWeek + nextWeek).count { it.roomReply == RoomReply.DECLINED }
-    if (declined > 0) parts += "$declined declined"
-    val roomless = (thisWeek + nextWeek).count { it.roomReply == RoomReply.NO_ROOM }
-    if (roomless > 0) parts += "$roomless without a room"
+    // Booked: holding a room; the others are counted as what needs looking at.
+    fun booked(list: List<BookingEntity>) = list.count { RoomCover.holds(it.roomReply) }
+    if (thisWeek.isNotEmpty()) parts += "This week: ${booked(thisWeek)} booked"
+    parts += if (nextWeek.isEmpty()) "Next week: not booked yet" else "Next week: ${booked(nextWeek)} booked"
+    val both = thisWeek + nextWeek
+    both.count { it.roomReply == RoomReply.DECLINED }.takeIf { it > 0 }?.let { parts += "$it declined" }
+    both.count { it.roomReply == RoomReply.NO_ROOM }.takeIf { it > 0 }?.let { parts += "$it without a room" }
+    both.count { it.roomReply == RoomReply.NOT_FOUND }.takeIf { it > 0 }?.let { parts += "$it missing" }
     return parts.joinToString(" · ")
 }

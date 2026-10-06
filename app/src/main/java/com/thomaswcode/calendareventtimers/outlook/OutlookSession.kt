@@ -2,6 +2,9 @@ package com.thomaswcode.calendareventtimers.outlook
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent
+import android.hardware.display.DisplayManager
+import android.view.Display
+import android.view.Surface
 import com.thomaswcode.calendareventtimers.ui.MainActivity
 import com.thomaswcode.calendareventtimers.util.ScanLog
 import java.util.concurrent.atomic.AtomicBoolean
@@ -9,7 +12,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** Where the app's longer jobs run, so they outlive the screen that started them. */
 object AppScope {
@@ -21,9 +26,10 @@ class OutlookBusy : Exception("Outlook is busy with another run; try again when 
 
 /**
  * One stretch of time with Outlook in front, driven by the accessibility service. Only one runs at
- * a time (timers, labels, bookings). It shows the strip over the status bar with STOP, can hide the
- * soft keyboard so it never covers lists, and whatever happens it removes the strip, restores the
- * keyboard and brings the app back (allowed while the service is bound).
+ * a time (timers, labels, bookings). It shows the strip over the status bar with STOP, which also
+ * holds the screen upright (no landscape mid-run), can hide the soft keyboard so it never covers
+ * lists, and whatever happens it removes the strip, restores the keyboard and brings the app back
+ * (allowed while the service is bound).
  */
 class OutlookSession private constructor(
     val service: OutlookReaderService,
@@ -62,6 +68,7 @@ class OutlookSession private constructor(
                     overlay.show(firstStep)
                     if (hideKeyboard) keyboard(service, AccessibilityService.SHOW_MODE_HIDDEN)
                 }
+                if (overlay.isShowing && !isUpright(service)) waitUntilUpright(service, overlay)
                 return block(session)
             } finally {
                 try {
@@ -76,6 +83,24 @@ class OutlookSession private constructor(
                     busy.set(false)
                 }
             }
+        }
+
+        private fun isUpright(service: AccessibilityService): Boolean =
+            service.getSystemService(DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY)?.rotation?.let { it == Surface.ROTATION_0 } ?: true
+
+        /**
+         * The run started with the screen sideways: the strip turns it upright, which takes a moment,
+         * and Outlook is driven only once it has (taps and swipes assume portrait).
+         */
+        private suspend fun waitUntilUpright(service: AccessibilityService, overlay: ScanOverlay) {
+            ScanLog.i("Turning the screen upright for the run")
+            val upright = withTimeoutOrNull(3_000) {
+                while (!isUpright(service)) delay(100)
+                true
+            }
+            if (upright == null) ScanLog.w("The screen didn't turn upright; going on anyway")
+            delay(400) // apps lay themselves out again after turning
+            withContext(Dispatchers.Main) { overlay.fitToScreen() }
         }
 
         private fun keyboard(service: AccessibilityService, mode: Int) {

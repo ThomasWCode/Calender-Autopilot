@@ -169,15 +169,18 @@ object ScanController {
         val failure: String? = if (plan.targets.isEmpty()) null else readInOutlook(plan.targets, all, reads)
         withContext(NonCancellable) {
             val read = reads.mapNotNull { (t, r) -> (r as? LabelRead.Read)?.let { t to it.categories } }.toMap()
-            labels.remember(read, Instant.now())
-            val known = plan.known + read.mapKeys { it.key.labelKey }
+            // The cache proved unreliable: what it gave this run is left out too.
+            val distrusted = labels.remember(read, Instant.now()) && plan.known.isNotEmpty()
+            val reused = if (distrusted) emptyMap() else plan.known
+            val known = reused + read.mapKeys { it.key.labelKey }
             val events = upcoming.mapNotNull { e ->
                 known[e.labelKey]?.let { cats -> ScannedEvent(e.title.trim(), e.date, e.start, e.location, cats) }
             }
-            val problems = reads.values.mapNotNull { (it as? LabelRead.Problem)?.message }
+            val problems = reads.values.mapNotNull { (it as? LabelRead.Problem)?.message } +
+                listOfNotNull(LabelPass.distrusted(upcoming.count { it.labelKey in plan.known }).takeIf { distrusted })
             val result = buildResult(
                 context, target, isToday, events, problems, started.size, zone, failure,
-                remembered = plan.known.size, readNow = read.size, usedOutlook = plan.targets.isNotEmpty(),
+                remembered = reused.size, readNow = read.size, usedOutlook = plan.targets.isNotEmpty(),
             )
             _state.value = if (failure == null) {
                 State.Done(result)

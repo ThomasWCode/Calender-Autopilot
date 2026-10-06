@@ -145,12 +145,14 @@ object BookingPlanner {
      * [c] against the calendar as it is now, just before booking it: the wizard may have been
      * answered long before Book Rooms. [events] are the occurrences of its day, [attendees] by event
      * row. A room is booked only for the event as answered: not moved, renamed, cancelled, declined,
-     * started or given a room of its own since. People who are no longer invitees aren't told.
-     * Other events aren't looked at again: a booking made earlier in the same run would count.
+     * started or given a room since, by the same rules as planning ([RoomCover.cover]), except that
+     * the bookings this run has made ([madeThisRun]: booking title and start) don't count: the
+     * user asked for those rooms together. People who are no longer invitees aren't told.
      */
     fun recheck(
         c: BookingCandidate, answers: Answers, events: List<CalEvent>, attendees: Map<Long, List<Attendee>>,
         known: KnownBooking?, rooms: List<String>, myAddresses: Set<String>, now: Instant,
+        madeThisRun: Set<Pair<String, Instant>> = emptySet(),
     ): Recheck {
         val e = events.firstOrNull { it.occurrenceKey == c.key }
             ?: events.firstOrNull { it.eventId == c.event.eventId && it.begin == c.event.begin }
@@ -165,10 +167,12 @@ object BookingPlanner {
         }
         val own = attendees[e.eventId].orEmpty()
         val mine = myAddresses.map { it.trim().lowercase() }.toSet()
-        RoomCover.cover(e, own, known, emptyList(), { emptyList() }, rooms, mine)?.let { cover ->
+        val others = events.filterNot { (CalEvent.normaliseTitle(it.title) to it.begin) in madeThisRun }
+        RoomCover.cover(e, own, known, others, { x -> attendees[x.eventId].orEmpty() }, rooms, mine)?.let { cover ->
             return Recheck.Skip("it has a room now${cover.room?.let { r -> " ($r)" }.orEmpty()}")
         }
-        val planned = c.notifyList(answers).map { it.email }
+        // Never the user (an address of theirs may have been learnt since the wizard).
+        val planned = c.notifyList(answers).map { it.email }.filter { it !in mine }
         val invited = People.toNotify(own, e.organizer, myAddresses, rooms).map { it.email }.toSet()
         val gone = planned.filter { it !in invited }
         val notes = if (gone.isEmpty()) emptyList() else listOf("not told, as no longer invited: ${gone.joinToString()}")

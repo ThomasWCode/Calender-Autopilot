@@ -100,7 +100,8 @@ object DescriptionText {
         s = numeric.replace(s) { m ->
             val v = m.groupValues[1]
             val code = if (v.startsWith("x") || v.startsWith("X")) v.drop(1).toIntOrNull(16) else v.toIntOrNull()
-            code?.let { String(Character.toChars(it)) } ?: m.value
+            // An out-of-range or surrogate code point (&#x110000;) is left as written.
+            code?.takeIf { Character.isValidCodePoint(it) && it !in 0xD800..0xDFFF }?.let { String(Character.toChars(it)) } ?: m.value
         }
         s = s.replace("&amp;", "&")
         s = s.lines().joinToString("\n") { it.replace(Regex("""[ \t ]+"""), " ").trim() }

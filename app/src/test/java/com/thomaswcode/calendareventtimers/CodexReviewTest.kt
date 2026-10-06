@@ -145,27 +145,30 @@ class BookingWithoutARoomTest {
 
     private fun after(minutes: Long) = made.plus(Duration.ofMinutes(minutes))
 
+    private fun reply(b: BookingEntity, found: Boolean, minutes: Long, vararg rooms: Pair<String, RoomReply>) =
+        BookingStore.replyFor(b, found, rooms.toList(), after(minutes))
+
     @Test
     fun aRoomTakenOffTheBookingStopsHoldingItOnceSynced() {
         // Just saved: Outlook may not have synced the room yet.
-        assertEquals(RoomReply.WAITING, BookingStore.replyFor(booking(), found = true, room = null, now = after(5)))
-        assertEquals(RoomReply.NO_ROOM, BookingStore.replyFor(booking(), found = true, room = null, now = after(20)))
+        assertEquals(RoomReply.WAITING, reply(booking(), true, 5).reply)
+        assertEquals(RoomReply.NO_ROOM, reply(booking(), true, 20).reply)
         // Reserved for a day, then the room was taken off in Outlook.
-        assertEquals(RoomReply.NO_ROOM, BookingStore.replyFor(booking(RoomReply.RESERVED, after(2)), found = true, room = null, now = after(24 * 60)))
-        assertEquals(RoomReply.RESERVED, BookingStore.replyFor(booking(RoomReply.WAITING), found = true, room = RoomReply.RESERVED, now = after(1)))
+        assertEquals(RoomReply.NO_ROOM, reply(booking(RoomReply.RESERVED, after(2)), true, 24 * 60).reply)
+        assertEquals(BookingStore.ReplyCheck(RoomReply.RESERVED), reply(booking(), true, 1, "KS-121" to RoomReply.RESERVED))
     }
 
     @Test
     fun aRoomJustChangedInManageBookingsGetsTimeToSync() {
         val changed = booking(RoomReply.WAITING, checkedAt = after(60))
-        assertEquals(RoomReply.WAITING, BookingStore.replyFor(changed, found = true, room = null, now = after(65)))
-        assertEquals(RoomReply.NO_ROOM, BookingStore.replyFor(changed, found = true, room = null, now = after(80)))
+        assertEquals(RoomReply.WAITING, reply(changed, true, 65).reply)
+        assertEquals(RoomReply.NO_ROOM, reply(changed, true, 80).reply)
     }
 
     @Test
     fun aBookingNotInTheCalendarIsStillNotFound() {
-        assertEquals(RoomReply.WAITING, BookingStore.replyFor(booking(), found = false, room = null, now = after(5)))
-        assertEquals(RoomReply.NOT_FOUND, BookingStore.replyFor(booking(), found = false, room = null, now = after(20)))
+        assertEquals(RoomReply.WAITING, reply(booking(), false, 5).reply)
+        assertEquals(RoomReply.NOT_FOUND, reply(booking(), false, 20).reply)
     }
 
     @Test

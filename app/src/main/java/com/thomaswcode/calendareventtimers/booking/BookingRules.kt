@@ -9,4 +9,7 @@ object BookingRules {
 
     /** One of the app's own booking events (never offered for a room or an alarm itself). */
     fun isRoomBooking(title: String): Boolean = title.trimStart().startsWith(TITLE_PREFIX, ignoreCase = true)
+
+    /** The event a booking is for: "Room Booking - Planning" → "Planning". */
+    fun originalTitle(bookingTitle: String): String = bookingTitle.trimStart().drop(TITLE_PREFIX.length).trim()
 }

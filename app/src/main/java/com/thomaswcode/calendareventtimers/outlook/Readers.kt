@@ -126,6 +126,8 @@ data class DetailsRead(
     val locations: List<String>,
     val categoryRowFound: Boolean,
     val categories: List<String>,
+    /** Same-day events only: the end in "14:00 to 14:55, duration: …". */
+    val end: LocalTime? = null,
 ) {
     /** The locations joined as the Day view's description joins them. */
     val location: String? get() = locations.joinToString("; ").ifEmpty { null }
@@ -141,6 +143,7 @@ data class DetailsRead(
         locations = if (later.locations.size > locations.size) later.locations else locations,
         categoryRowFound = categoryRowFound || later.categoryRowFound,
         categories = if (categoryRowFound) categories else later.categories,
+        end = end ?: later.end,
     )
 }
 
@@ -171,8 +174,13 @@ object DetailsReader {
             locations = rows,
             categoryRowFound = row != null,
             categories = categories,
+            // A multi-day event (its own start time field) has no end in this form.
+            end = if (root.byId(DETAILS_START_TIME) != null) null else sameDayEnd.find(cleanUiText(endDate?.desc).orEmpty())?.let { EventParser.parseTime(it.groupValues[1]) },
         )
     }
+
+    /** "14:00 to 14:55, duration: 55 minutes": the second time. */
+    private val sameDayEnd = Regex("""^\s*\d{1,2}[:.]\d{2}(?:\s*[AaPp]\.?\s*[Mm]\.?)?\s+to\s+(\d{1,2}[:.]\d{2}(?:\s*[AaPp]\.?\s*[Mm]\.?)?)""")
 
     private fun texts(root: UiNode, id: String, pick: (UiNode) -> String?): List<String> =
         root.findAll { it.viewId == id }.mapNotNull { cleanUiText(pick(it))?.ifEmpty { null } }.distinct()

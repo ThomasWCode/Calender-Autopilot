@@ -37,11 +37,12 @@ class LabelPass(context: Context) {
     /**
      * Stores labels read in Outlook. An entry that had expired but kept the same change key is
      * compared first: if the labels differ, the change key can't be trusted to notice label
-     * changes, so the whole cache is dropped (and the log says so).
+     * changes, so the whole cache is dropped (and the log says so). Returns true then: the labels
+     * this run took from the cache ([Plan.known]) can't be trusted either.
      */
-    suspend fun remember(reads: Map<LabelTarget, List<String>>, now: Instant) {
+    suspend fun remember(reads: Map<LabelTarget, List<String>>, now: Instant): Boolean {
         val keyed = reads.filterKeys { it.changeKey != null }
-        if (keyed.isEmpty()) return
+        if (keyed.isEmpty()) return false
         val before = dao.get(keyed.keys.map { it.labelKey }).associateBy { it.labelKey }
         val stale = keyed.filter { (t, cats) ->
             val old = before[t.labelKey]
@@ -53,7 +54,15 @@ class LabelPass(context: Context) {
         }
         dao.put(keyed.map { (t, cats) -> LabelCacheEntity(t.labelKey, t.changeKey!!, ListCodec.encode(cats), t.title, now.toEpochMilli()) })
         dao.prune(now.minus(LabelCachePolicy.MAX_AGE).toEpochMilli())
+        return stale.isNotEmpty()
     }
 
     suspend fun forgetAll() = dao.clear()
+
+    companion object {
+        /** Said when the cache was dropped mid-run and the labels it gave this run were left out. */
+        fun distrusted(count: Int): String =
+            "Outlook changed a label without the phone's calendar noticing, so remembered labels can't be trusted: " +
+                "$count event(s) whose labels were remembered are left out this time. Run again to read them in Outlook."
+    }
 }

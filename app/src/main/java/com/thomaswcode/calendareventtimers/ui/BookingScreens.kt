@@ -242,12 +242,7 @@ private fun WeekStatus(bookings: List<BookingEntity>, monday: LocalDate) {
         Text("Bookings", style = MaterialTheme.typography.titleMedium)
         for ((label, start) in listOf("This week" to monday, "Next week" to monday.plusWeeks(1))) {
             val list = week(start)
-            val text = if (list.isEmpty()) "none" else listOfNotNull(
-                "${list.size} booked",
-                list.count { it.roomReply == RoomReply.WAITING }.takeIf { it > 0 }?.let { "$it waiting for a reply" },
-                list.count { it.roomReply == RoomReply.DECLINED }.takeIf { it > 0 }?.let { "$it declined" },
-                list.count { it.roomReply == RoomReply.NO_ROOM }.takeIf { it > 0 }?.let { "$it without a room" },
-            ).joinToString(" · ")
+            val text = if (list.isEmpty()) "none" else ReplyText.summary(list)
             Text("$label: $text", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -331,7 +326,7 @@ private fun CandidateStep(
                         Button(onClick = onNext, modifier = Modifier.weight(1f)) { Text(nextLabel) }
                     }
                     if (onRest != null) {
-                        TextButton(onClick = onRest, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Use these answers for the rest ›") }
+                        TextButton(onClick = onRest, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Keep the rest as suggested ›") }
                     }
                 }
             }
@@ -614,6 +609,7 @@ private fun summaryLine(r: BookingResults): String {
     val parts = mutableListOf(if (r.dryRun) "$booked would be booked" else "$booked booked")
     r.rows.count { it.outcome is RowOutcome.NoRoom }.takeIf { it > 0 }?.let { parts += "$it with no free room" }
     r.rows.count { it.outcome is RowOutcome.Failed }.takeIf { it > 0 }?.let { parts += "$it failed" }
+    r.rows.count { it.outcome is RowOutcome.Uncertain }.takeIf { it > 0 }?.let { parts += "$it to check in Outlook" }
     r.rows.count { it.outcome is RowOutcome.NotDone }.takeIf { it > 0 }?.let { parts += "$it not done" }
     return parts.joinToString(" · ")
 }
@@ -629,13 +625,25 @@ private fun ResultCard(row: ResultRow, replies: Map<Long, RoomReply>) {
                 reply == RoomReply.RESERVED -> "Reserved"
                 reply == RoomReply.TENTATIVE -> "Tentative (needs approval)"
                 reply == RoomReply.DECLINED -> "Declined: try another room in Manage bookings"
-                reply == RoomReply.NOT_FOUND -> "not found in the calendar"
+                reply == RoomReply.NOT_FOUND -> "missing from the calendar: check Outlook"
                 reply == RoomReply.NO_ROOM -> "the room is no longer on it: change it in Manage bookings"
                 else -> "waiting for the room's reply…"
             }
             val notified = o.told.size.takeIf { it > 0 }?.let { " · told $it" } ?: ""
-            Triple("✓", "${o.room} · $status$notified" + o.notes.joinToString("") { "\n($it)" },
-                if (reply == RoomReply.DECLINED || reply == RoomReply.NO_ROOM) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+            Triple(
+                if (reply != null && ReplyText.needsAttention(reply)) "!" else "✓",
+                "${o.room} · $status$notified" + o.notes.joinToString("") { "\n($it)" },
+                if (reply != null && ReplyText.needsAttention(reply)) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+            )
+        }
+        is RowOutcome.Uncertain -> {
+            val reply = o.bookingId?.let { replies[it] }
+            Triple(
+                "?",
+                "Maybe booked${o.room?.let { " in $it" }.orEmpty()}: check Outlook before booking it again" +
+                    (reply?.let { " (the calendar says: ${ReplyText.short(it)})" }.orEmpty()) + "\n(${o.reason})",
+                MaterialTheme.colorScheme.error,
+            )
         }
         is RowOutcome.NoRoom -> Triple("✗", "No room in your list was free", MaterialTheme.colorScheme.error)
         is RowOutcome.Failed -> Triple("!", "Not booked: ${o.reason}", MaterialTheme.colorScheme.error)

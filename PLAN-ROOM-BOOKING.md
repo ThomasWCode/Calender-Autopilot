@@ -252,9 +252,11 @@ on the same day, isn't cancelled or declined by the user, isn't one of the app's
 
 Checked from the provider, so free of screen time. In order:
 
-1. **An app booking**: a `bookings` row for this occurrence that isn't deleted, or a provider
-   event titled `Room Booking - {title}` starting at the same time (finds bookings the database
-   doesn't know, e.g. after a reinstall). Its room's reply gives Reserved / Waiting / **Declined**.
+1. **An app booking** for the meeting's whole time: a `bookings` row for this occurrence that isn't
+   deleted, or a provider event of the user's titled `Room Booking - {title}` starting at the same
+   time (finds bookings the database doesn't know, e.g. after a reinstall; a colleague's event of
+   that name doesn't count). Its room's reply gives Reserved / Waiting / **Declined**. A booking
+   shorter than the meeting (made longer since) doesn't count; it shows as a note.
 2. **A room on the event itself**: a type-3 attendee, or an attendee whose name or address matches
    a room in the list, that hasn't declined (`… [room added]`, a colleague's meeting in KS-103D).
    Also when the location names a room in the list that isn't an attendee ("Location says
@@ -306,7 +308,9 @@ Memory is never silent: remembered answers are labelled, and Settings can forget
 
 1. Tap a range → label pass in Outlook if needed (overlay as now) → back in the app.
 2. **Wizard**: one screen per candidate that isn't covered and has no answer yet, pre-filled, so an
-   unchanged event is one **Next**. *Use these answers for the rest* jumps to the summary.
+   unchanged event is one **Next**. *Keep the rest as suggested* jumps to the summary, the
+   remaining events keeping their suggested answers (renamed from *Use these answers for the rest*,
+   which promised copying the current answers, 2026-10-06).
 
    ```
    ┌──────────────────────────────────────────────┐
@@ -323,7 +327,7 @@ Memory is never silent: remembered answers are labelled, and Settings can forget
    │   (answers as last time)                     │
    │                                              │
    │ [ Back ]                          [ Next ]   │
-   │          Use these answers for the rest ›    │
+   │              Keep the rest as suggested ›    │
    └──────────────────────────────────────────────┘
    ```
 3. **Summary**: every candidate in the range, including ones answered before (but never ones
@@ -654,7 +658,8 @@ bookings). Where it differs from, or adds to, the sections above:
   meeting and per event, labels read in Outlook, people's names), with the counts shown above it and
   a confirmation; bookings, alarms and settings stay. Forgetting only the answers or only the labels
   is still offered.
-- **Dry runs remember nothing**: no bookings, answers or series memory are written.
+- **Dry runs record no bookings or answers** (occurrence answers and series memory); labels read in
+  Outlook and people's names are remembered as in any run. Manage bookings is always real.
 - **Events declined by the user** are left out of both features (QUESTIONS.md Q4), and the engine
   reads Outlook's main calendar only (Q3); the Day view is compared with the provider on every day
   visited and differences are logged.
@@ -673,6 +678,39 @@ bookings). Where it differs from, or adds to, the sections above:
   started or given a room since the wizard isn't booked ("not done", run again), and people no
   longer invited aren't told. A form that can't be left without saving fails its booking instead of
   being reported as discarded.
+- **Second round (2026-10-06): Codex's second review and another agent's review.**
+  - *Edits act on one event only.* Manage bookings opens every event that could be the booking and
+    acts only when exactly one fits its title, start, end (from the details screen) and room; two
+    that fit stop it, as Outlook doesn't show which is which.
+  - *STOP can't lose a change.* What a Manage change did is recorded inside the Outlook run, before
+    it tidies up; a confirmed delete runs to its end like Save.
+  - *"Maybe saved" is said so.* If Outlook goes somewhere unexpected after Save, the result says to
+    check Outlook (not "not booked" or "nothing changed"); a new booking is kept as one until the
+    calendar shows whether it was saved (missing after the sync grace if not).
+  - *A form that can't be closed after a failed step stops the run*, so nothing else goes into it.
+  - *Replies belong to rooms.* Only the booking's own room's reply counts; after a room change the
+    calendar may still show the old room for a while, and after the sync grace a room changed in
+    Outlook is followed. A booking whose event has been seen is followed by its sync id only, at its
+    own time: moved or gone, it is missing, never given a lookalike. Cancelled events are ignored.
+  - *Cover is the user's own and whole* (§3.5), and the check before booking uses the same rules,
+    except for bookings made earlier in the same run.
+  - *People.* Each person told must show on a chip by address before Save, and a removal is checked
+    the same way (by the chip's description or its text); the user's own form address is never added.
+  - *The form's account must be an LSHTM one* (several accounts in Outlook), and the run's own
+    addresses grow as the form shows them.
+  - *Labels.* If the change key proves unreliable mid-run, the labels the run took from memory are
+    left out too (with a message to run again), not only forgotten for next time.
+  - *Small ones.* Only a plain "Free" is free; an invalid `&#…;` in a description is kept as
+    written; the people dialog scrolls; week summaries count only bookings holding a room as
+    booked and name missing ones; the wizard's shortcut is renamed (§3.8); Manage bookings lists
+    the user's booking events it has no record of.
+  - *Not done:* a fake-driver harness for testing whole booking and edit sequences (the other
+    review's I09); the pure rules and readers are tested, and the sequences are in PHONE-CHECKS.md.
+- **The screen stays upright** during every Outlook run (the user's request, 2026-10-06): the STOP
+  strip asks for portrait, which Android honours for any visible window, as if auto-rotate were off.
+  Nothing to restore: the hold goes with the strip, even if the app crashes. If the run starts
+  sideways, it waits for the screen to turn first. The system auto-rotate setting is never touched
+  (that would need the *Modify system settings* permission and restoring; QUESTIONS.md Q17).
 - **Code review fixes (2026-10-05).** STOP no longer leaves Outlook marked busy; Change room leaves
   the booking's own room out; Change room, Edit people and Delete open each candidate event and act
   only on the one with the exact title, start and recorded room; once Save is pressed it runs to the
