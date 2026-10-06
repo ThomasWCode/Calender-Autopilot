@@ -20,8 +20,10 @@ offered again, like any event without a room. `ManageController.apply`.
 **Q3. Other Outlook calendars.** The engine reads only Outlook's main calendar ("Calendar
 (eiderwhi@…)"). Events of other calendars Outlook may show in its Day view (e.g. the "TB Modelling
 Group" group calendar) are no longer offered for alarms or rooms.
-*Now:* **main calendar only**; every Day view visited is compared with the provider and differences
-are logged (PHONE-CHECKS A5). If some should count: a calendar list in Settings.
+*Now:* **main calendar only**, and only the LSHTM account's (with another account in Outlook, its
+"Calendar" is never read; two LSHTM accounts are refused as unclear); every Day view visited is
+compared with the provider and differences are logged (PHONE-CHECKS A5). If some should count: a
+calendar list in Settings.
 
 **Q4. Events you declined** (your reply "declined") — offered for alarms or rooms?
 *Now:* **no**, for both. Before, the timers took whatever the Day view showed.

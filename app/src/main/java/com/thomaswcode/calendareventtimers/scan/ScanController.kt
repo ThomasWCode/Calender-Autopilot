@@ -130,7 +130,7 @@ object ScanController {
                     if (useCalendar) ScanLog.w("Falling back to reading the whole day in Outlook")
                     val service = OutlookReaderService.instance
                     if (service == null) {
-                        _state.value = State.Failed(target, isToday, "Outlook's calendar isn't in the phone's calendar store, and the Outlook reader is off.", null)
+                        _state.value = State.Failed(target, isToday, "Outlook's LSHTM calendar isn't in the phone's calendar store, and the Outlook reader is off.", null)
                     } else {
                         runFullScan(app, service, target, isToday, zone)
                     }

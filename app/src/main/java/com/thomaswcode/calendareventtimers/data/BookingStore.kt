@@ -146,7 +146,9 @@ class BookingStore private constructor(private val context: Context) {
         val events = ownBookingEvents(calendar.occurrencesOn(main, dates.min(), dates.max(), zone), BookingController.myAddresses(main))
         val attendees = calendar.attendees(events.map { it.eventId })
         val settled = bookings.filter { synced(it, now) }.map { it.id }.toSet()
-        val paired = pair(bookings, events, settled) { e -> RoomCover.roomReply(attendees[e.eventId].orEmpty(), rooms)?.first }
+        val paired = pair(bookings, events, settled, { e -> declined(attendees[e.eventId].orEmpty(), rooms) }) { e ->
+            RoomCover.roomReply(attendees[e.eventId].orEmpty(), rooms)?.first
+        }
         val unsure = unsure(bookings, events, paired)
         var changed = 0
         for (b in bookings) {
@@ -225,6 +227,10 @@ class BookingStore private constructor(private val context: Context) {
          * a missing room keeps the reply it had; after that, a missing event is NOT_FOUND, a booking
          * without a room is NO_ROOM, and one with another room (changed in Outlook) follows it.
          */
+        /** A booking event whose rooms all declined. */
+        fun declined(attendees: List<Attendee>, rooms: List<String>): Boolean =
+            RoomCover.roomReplies(attendees, rooms).let { r -> r.isNotEmpty() && r.all { it.second == RoomReply.DECLINED } }
+
         /** Long enough since [b] was made, or its room or reply last changed, for Outlook to have synced it. */
         fun synced(b: BookingEntity, now: Instant): Boolean =
             Duration.between(Instant.ofEpochMilli(maxOf(b.createdAt, b.checkedAt ?: 0L)), now) > SYNC_GRACE
@@ -260,12 +266,14 @@ class BookingStore private constructor(private val context: Context) {
          * an event another booking has seen: a booking and an event that fit each other alone by room
          * ([roomOf]) and end (a re-booked event leaves the declined booking at the same time and title);
          * or, once the booking has had time to sync ([settled]), the one event of its title and time
-         * even with another room or end (changed in Outlook). Before then a lone event that doesn't
-         * fit may be an old one, the booking's own not yet synced. Anything less clear stays unpaired
-         * ([unsure]) rather than tie a booking to another's event.
+         * even with another room or end (changed in Outlook). Before then, an event that doesn't fit,
+         * or whose room declined ([declinedOf]: a new booking's room hasn't answered yet), may be an
+         * old one, the booking's own not yet synced. Anything less clear stays unpaired ([unsure])
+         * rather than tie a booking to another's event.
          */
         fun pair(
-            bookings: List<BookingEntity>, events: List<CalEvent>, settled: Set<Long> = emptySet(), roomOf: (CalEvent) -> String?,
+            bookings: List<BookingEntity>, events: List<CalEvent>, settled: Set<Long> = emptySet(),
+            declinedOf: (CalEvent) -> Boolean = { false }, roomOf: (CalEvent) -> String?,
         ): Map<Long, CalEvent> {
             val live = events.filter { !it.cancelled }
             val claimed = bookings.mapNotNull { it.bookingSyncId }.toSet()
@@ -288,7 +296,10 @@ class BookingStore private constructor(private val context: Context) {
                     continue
                 }
                 for (b in group) {
-                    val e = candidates.filter { fits(it, b) }.singleOrNull() ?: continue
+                    val fitting = candidates.filter { fits(it, b) }
+                    // A declined one is the booking's only once it has had time to sync, and never
+                    // when another fits too (an old booking event at the same time and room).
+                    val e = (if (b.id in settled && fitting.size == 1) fitting else fitting.filterNot(declinedOf)).singleOrNull() ?: continue
                     if (group.count { fits(e, it) } == 1) out[b.id] = e
                 }
             }

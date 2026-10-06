@@ -55,6 +55,7 @@ import com.thomaswcode.calendareventtimers.util.Prefs
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private val dayHeading = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.UK)
@@ -75,6 +76,15 @@ fun ManageBookingsScreen(snackbar: SnackbarHostState, onBack: () -> Unit) {
         onPauseOrDispose { }
     }
     LaunchedEffect(reloads) { bookings = ManageController.load(context) }
+    // After a change, the calendar shows it only once Outlook syncs: look again every 5 s for 2 minutes.
+    var changes by remember { mutableIntStateOf(0) }
+    LaunchedEffect(changes) {
+        if (changes == 0) return@LaunchedEffect
+        repeat(24) {
+            delay(5_000)
+            reloads++
+        }
+    }
     LaunchedEffect(state) {
         val s = state
         if (s is ManageController.State.Finished) {
@@ -83,6 +93,7 @@ fun ManageBookingsScreen(snackbar: SnackbarHostState, onBack: () -> Unit) {
             scope.launch { snackbar.showNow(s.message) }
             ManageController.clearMessage()
             reloads++
+            changes++
         }
     }
     var deleting by remember { mutableStateOf<ManagedBooking?>(null) }
@@ -211,12 +222,15 @@ private fun BookingCard(
                     Text(m.notified.joinToString { it.display }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (m.fromCalendar) {
-                    Text("Found in your calendar; the app has no record of it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        if (m.syncing) "Changed just now: waiting for Outlook to update the calendar" else "Found in your calendar; the app has no record of it",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 m.warnings.forEach { Text("⚠ $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             }
             var menu by remember { mutableStateOf(false) }
-            IconButton(onClick = { menu = true }, enabled = enabled) { Icon(Icons.Default.MoreVert, contentDescription = "Change ${b.originalTitle}'s booking") }
+            IconButton(onClick = { menu = true }, enabled = enabled && !m.syncing) { Icon(Icons.Default.MoreVert, contentDescription = "Change ${b.originalTitle}'s booking") }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 if (b.roomReply == RoomReply.NOT_FOUND && !m.fromCalendar) {
                     DropdownMenuItem(text = { Text("Forget it") }, onClick = { menu = false; onForget() })

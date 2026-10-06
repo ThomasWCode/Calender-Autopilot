@@ -120,7 +120,7 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         notes.clear()
         return withFormGuard(title) {
             openForEdit(date, start, end, title, room)
-            val chosen = chooseRoom(settings, clearFirst = true)
+            val chosen = chooseRoom(settings, clearFirst = true, current = room)
             if (chosen == null) {
                 discard()
                 return@withFormGuard BookingOutcome.NoRoom(missingRooms)
@@ -398,14 +398,25 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
 
     // ---- Room ----
 
-    /** Chooses the room (PLAN-ROOM-BOOKING.md §3.10); null when none is free (back on the form). */
-    private suspend fun chooseRoom(settings: RoomSettings, clearFirst: Boolean): String? {
+    /**
+     * Chooses the room (PLAN-ROOM-BOOKING.md §3.10); null when none is free (back on the form).
+     * [clearFirst] (Change room) clears the old location first, which takes every location chip with
+     * it: so a booking with anything besides rooms there ([current], or one from the list) is refused.
+     */
+    private suspend fun chooseRoom(settings: RoomSettings, clearFirst: Boolean, current: String? = null): String? {
         missingRooms = emptyList()
         val row = EventFormReader.locationRow(driver.snapshot()) ?: fail("Couldn't find the form's Location row")
         nav.onProgress("Looking for a free room…")
         driver.click(row.node, "Location row")
         driver.waitFor(4_000) { if (LocationReader.isOpen(it)) true else null } ?: fail("Add Location didn't open")
-        if (clearFirst) clearLocations()
+        if (clearFirst) {
+            val others = LocationReader.chips(driver.snapshot())
+                .filterNot { c -> RoomChoice.sameRoom(c, current) || settings.rooms.any { RoomChoice.sameRoom(c, it) } }
+            if (others.isNotEmpty()) {
+                fail("The booking has another location too (${others.joinToString()}), which changing the room here would remove: change it in Outlook")
+            }
+            clearLocations()
+        }
 
         if (settings.recentShortcut) {
             // Recent can be empty: don't wait long for it.

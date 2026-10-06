@@ -33,7 +33,7 @@ class CalendarStore(context: Context) {
             "account_type = ?", arrayOf(CalendarRows.OUTLOOK_ACCOUNT_TYPE),
         )
         return CalendarRows.mainCalendar(CalendarRows.calendars(rows)).also {
-            if (it == null) ScanLog.w("No Outlook calendar in the phone's calendar store (${rows.size} Outlook calendars)")
+            if (it == null) ScanLog.w("No single LSHTM Outlook calendar in the phone's calendar store (${rows.size} Outlook calendars)")
         }
     }
 

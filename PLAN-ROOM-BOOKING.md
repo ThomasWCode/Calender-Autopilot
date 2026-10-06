@@ -723,6 +723,13 @@ bookings). Where it differs from, or adds to, the sections above:
   so an alarm set by a whole-day scan isn't set again; a booking found only in the calendar isn't
   linked to a meeting when two of that title are at its time; a new booking is tied to a lone event
   at its time with another room only after the sync grace (before, it may be an old one).
+- **Sixth round (Codex, 2026-10-06).** The main calendar is the LSHTM account's "Calendar" only
+  (other accounts in Outlook have one too; two LSHTM ones are refused as unclear); while a new
+  booking syncs, an event whose room declined isn't taken as its own (it may be an old booking);
+  Change room refuses a booking with locations besides rooms, which clearing would remove; the
+  people told are read from the booking event (changed in Outlook, the record follows); a booking
+  found only in the calendar that was just changed is marked as waiting for Outlook to sync, can't
+  be changed again meanwhile, and the screen looks again every 5 s for 2 minutes.
 - **The screen stays upright** during every Outlook run (the user's request, 2026-10-06): the STOP
   strip asks for portrait, which Android honours for any visible window, as if auto-rotate were off.
   Nothing to restore: the hold goes with the strip, even if the app crashes. If the run starts

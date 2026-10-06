@@ -49,6 +49,8 @@ data class ManagedBooking(
     val warnings: List<String>,
     /** A booking event found in the calendar that the app has no record of (made before a reinstall, say). */
     val fromCalendar: Boolean = false,
+    /** Such a booking was just changed in Outlook and the calendar doesn't show it yet: not to be changed again. */
+    val syncing: Boolean = false,
 )
 
 /**
@@ -91,15 +93,27 @@ object ManageController {
         val events = main?.let { calendar.occurrencesOn(it, today, last, zone) }.orEmpty()
         val bookingEvents = BookingStore.ownBookingEvents(events, mine)
         val attendees = calendar.attendees((events.map { it.eventId } + bookings.map { it.originalEventId }).distinct())
-        val settled = bookings.filter { BookingStore.synced(it, Instant.now()) }.map { it.id }.toSet()
-        val pairs = BookingStore.pair(bookings, bookingEvents, settled) { e -> RoomCover.roomReply(attendees[e.eventId].orEmpty(), rooms)?.first }
+        val now = Instant.now()
+        val settled = bookings.filter { BookingStore.synced(it, now) }.map { it.id }.toSet()
+        val pairs = BookingStore.pair(bookings, bookingEvents, settled, { e -> BookingStore.declined(attendees[e.eventId].orEmpty(), rooms) }) { e ->
+            RoomCover.roomReply(attendees[e.eventId].orEmpty(), rooms)?.first
+        }
         val paired = pairs.values.map { it.occurrenceKey }.toSet()
         // Events that may be one of the app's own (unsure which) aren't listed as found in the calendar.
         val unsure = BookingStore.unsure(bookings, bookingEvents, pairs).let { ids -> bookings.filter { it.id in ids } }
         val found = calendarOnly(
             bookingEvents.filter { e -> e.occurrenceKey !in paired && unsure.none { BookingStore.matches(e, it) } }, events, attendees, rooms, mine,
         )
-        val all = (bookings.map { it to false } + found.map { it to true }).sortedWith(compareBy({ it.first.eventDate }, { it.first.start }))
+        // The people told as the booking event has them now: they may have been changed in Outlook,
+        // and Edit people works from this list (anyone left off it couldn't be taken off the booking).
+        val recorded = bookings.map { b ->
+            val told = pairs[b.id]?.let { toldOn(attendees[it.eventId].orEmpty(), rooms, mine) } ?: return@map b
+            if (told.toSet() == ListCodec.decode(b.notified).toSet()) return@map b
+            store.setNotified(b.id, told)
+            ScanLog.i("Booking ${b.id} (${b.originalTitle}): people told are now ${told.size}, as in Outlook")
+            b.copy(notified = ListCodec.encode(told))
+        }
+        val all = (recorded.map { it to false } + found.map { it to true }).sortedWith(compareBy({ it.first.eventDate }, { it.first.start }))
         if (all.isEmpty()) return@withContext emptyList()
         val originals = all.associate { (b, _) -> b.id to originalOf(b, events) }
         val labels = AutopilotDatabase.get(app).labels().get(originals.values.mapNotNull { it?.labelKey }.distinct())
@@ -111,9 +125,25 @@ object ManageController {
             val offered = original?.let { People.toNotify(attendees[it.eventId].orEmpty(), it.organizer, mine, rooms) }.orEmpty()
             // A booking found in the calendar is for a meeting of its title at its time; with two, unclear which.
             val unclear = fromCalendar && original == null && meetingsLike(b.originalTitle, b.eventDate, b.start, events).size > 1
-            ManagedBooking(b, notified, (offered + notified).distinctBy { it.email }, warnings(b, original, events, labels, main != null, unclear), fromCalendar)
+            val syncing = fromCalendar && (changedInOutlook[shadowKey(b)] ?: 0L) > now.toEpochMilli()
+            ManagedBooking(b, notified, (offered + notified).distinctBy { it.email }, warnings(b, original, events, labels, main != null, unclear), fromCalendar, syncing)
         }
     }
+
+    /** Who a booking event tells: its people, not rooms and not the user. */
+    internal fun toldOn(attendees: List<Attendee>, rooms: List<String>, mine: Set<String>): List<String> =
+        attendees.filter { !it.isResource && RoomChoice.roomIn(it.email, rooms) == null && RoomChoice.roomIn(it.name, rooms) == null }
+            .mapNotNull { it.email?.trim()?.lowercase() }.filter { it.contains('@') && it !in mine }.distinct()
+
+    /**
+     * Bookings found only in the calendar that were just changed in Outlook, until when: the app has
+     * no record to update, and the calendar shows the change only once Outlook syncs, so meanwhile
+     * they are marked and can't be changed again (that would act on what is already changed).
+     */
+    private val changedInOutlook = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private const val SYNC_SHADOW_MS = 2 * 60_000L
+
+    private fun shadowKey(b: BookingEntity): String = b.bookingSyncId ?: "${b.eventDate} ${b.start} ${b.bookingTitle}"
 
     /** Meetings a booking called "Room Booking - [title]" may be for: that title, on [date] at [start]. */
     private fun meetingsLike(title: String, date: String, start: String, events: List<CalEvent>): List<CalEvent> = events.filter {
@@ -148,8 +178,7 @@ object ManageController {
             val original = meetingsLike(title, e.date.toString(), TriggerTime.formatHhMm(e.start), events).singleOrNull()
             val on = attendees[e.eventId].orEmpty()
             val reply = RoomCover.roomReply(on, rooms)
-            val told = on.filter { !it.isResource && RoomChoice.roomIn(it.email, rooms) == null }
-                .mapNotNull { it.email?.trim()?.lowercase() }.filter { it.contains('@') && it !in mine }.distinct()
+            val told = toldOn(on, rooms, mine)
             BookingEntity(
                 id = -(i + 1L),
                 occurrenceKey = original?.occurrenceKey ?: "calendar:${e.occurrenceKey}",
@@ -288,6 +317,9 @@ object ManageController {
     private suspend fun apply(context: Context, booking: BookingEntity, outcome: BookingOutcome, peopleAfter: List<String>?): String {
         val store = BookingStore.get(context)
         val recorded = booking.id > 0
+        if (!recorded && (outcome is BookingOutcome.Booked || outcome is BookingOutcome.Changed || outcome is BookingOutcome.Uncertain)) {
+            changedInOutlook[shadowKey(booking)] = System.currentTimeMillis() + SYNC_SHADOW_MS
+        }
         return when (outcome) {
             is BookingOutcome.Booked -> {
                 if (recorded) store.setRoom(booking.id, outcome.room)
