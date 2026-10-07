@@ -11,7 +11,6 @@ import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
-import android.os.SystemClock
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.thomaswcode.calendareventtimers.alarm.AlarmScheduler
@@ -130,7 +129,7 @@ object SetupChecks {
         val activity = context.findActivity()
         for (intent in intents) {
             try {
-                AppNav.awayAt = SystemClock.elapsedRealtime()
+                AppNav.awayOnPurpose = true
                 if (activity != null) activity.startActivity(intent) else context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 return
             } catch (e: Exception) {

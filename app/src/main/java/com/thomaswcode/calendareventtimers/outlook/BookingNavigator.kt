@@ -665,6 +665,46 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         if (email.lowercase() in PeopleReader.chipAddresses(driver.freshSnapshot())) fail("$email is still on the booking")
     }
 
+    // ---- Debug builds ([DebugProbes]): test events for the phone checks (PHONE-CHECKS.md D) ----
+
+    /** A plain event without people, alert or location, saved. */
+    internal suspend fun probeCreateEvent(date: LocalDate, start: LocalTime, end: LocalTime, title: String): BookingOutcome {
+        notes.clear()
+        nav.ensureOnDay(date)
+        return withFormGuard(title) {
+            openNewEventForm()
+            setTime(date, start, end)
+            setTitle(title)
+            setAlertNone()
+            setOnlineMeetingOff()
+            save(null)
+            BookingOutcome.Changed("created")
+        }
+    }
+
+    /** An event's new times ([newStart]–[newEnd]) and/or its location cleared, saved. */
+    internal suspend fun probeEditEvent(
+        date: LocalDate, start: LocalTime, end: LocalTime?, title: String, room: String?,
+        newStart: LocalTime?, newEnd: LocalTime?, clearLocation: Boolean,
+    ): BookingOutcome {
+        notes.clear()
+        return withFormGuard(title) {
+            openForEdit(date, start, end, title, room)
+            if (newStart != null && newEnd != null) setTime(date, newStart, newEnd)
+            if (clearLocation) {
+                val row = EventFormReader.locationRow(driver.snapshot()) ?: fail("Couldn't find the form's Location row")
+                driver.click(row.node, "Location row")
+                driver.waitFor(4_000) { if (LocationReader.isOpen(it)) true else null } ?: fail("Add Location didn't open")
+                clearLocations()
+                val done = LocationReader.doneButton(driver.snapshot()) ?: fail("No Done in Add Location")
+                driver.click(done, "location Done")
+                waitForForm("Add Location didn't close")
+            }
+            save(null)
+            BookingOutcome.Changed("edited")
+        }
+    }
+
     /** Debug builds ([DebugProbes]): the people steps on an open Add People screen. Nothing is saved. */
     internal suspend fun probePeople(add: List<String>, remove: List<String>): List<String> {
         notes.clear()

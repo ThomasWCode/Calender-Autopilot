@@ -233,15 +233,18 @@ class PhoneChecksReviewTest {
     }
 
     @Test
-    fun backFromSettingsCountsForAWhileOnly() {
-        try {
-            AppNav.awayAt = 1_000L
-            assertTrue(AppNav.awayOnPurpose(1_000L + 60_000L))
-            assertFalse(AppNav.awayOnPurpose(1_000L + AppNav.AWAY_MAX_MS + 1))
-            AppNav.awayAt = 0L
-            assertFalse(AppNav.awayOnPurpose(5_000L))
-        } finally {
-            AppNav.awayAt = 0L
+    fun aRetryNeverOffersAnOccurrenceAlreadyTried() {
+        // Three phantom occurrences, then a real one: each round offers the next, then none.
+        val events = (12..15).map { event("series", it, 9) }
+        var tried = LabelTargets.choose(events)
+        val absent = ArrayList(tried)
+        repeat(3) {
+            val next = LabelTargets.retry(events, emptySet(), tried, absent)
+            assertEquals(1, next.size)
+            assertTrue(next.single() !in tried)
+            tried = tried + next
+            if (it < 2) absent += next
         }
+        assertTrue(LabelTargets.retry(events, emptySet(), tried, absent).isEmpty())
     }
 }

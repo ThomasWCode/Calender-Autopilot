@@ -74,7 +74,7 @@ class OutlookNavigator(
      * (only logged: it shows calendars or sync gaps the provider misses). Results go into [out]
      * as they are read, so a run that stops part-way keeps what it read. Then [more] gives targets
      * to read next, from what was read (another occurrence of a series whose chosen one was absent),
-     * until it gives none.
+     * until it gives none: it never gives one already read, so this ends.
      */
     suspend fun readLabels(
         targets: List<LabelTarget>,
@@ -88,10 +88,8 @@ class OutlookNavigator(
         ensureDayView()
         var round = targets
         var total = targets.size
-        var rounds = 0
         while (round.isNotEmpty()) {
             readRound(round, expected, out, total)
-            if (++rounds >= MAX_LABEL_ROUNDS) break
             round = more(out).filter { it !in out }
             total += round.size
         }
@@ -595,9 +593,6 @@ class OutlookNavigator(
 
         /** Blocks opened at most for one slot (a title that is part of other titles at the same time). */
         const val MAX_SLOT_BLOCKS = 6
-
-        /** Rounds of [readLabels]: the targets, then other occurrences of series found absent. */
-        const val MAX_LABEL_ROUNDS = 3
     }
 }
 
