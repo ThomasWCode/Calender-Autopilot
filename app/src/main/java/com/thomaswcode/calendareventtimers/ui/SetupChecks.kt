@@ -123,6 +123,7 @@ object SetupChecks {
         } + Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg)
         for (intent in intents) {
             try {
+                AppNav.awayOnPurpose = true
                 context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 return
             } catch (e: Exception) {

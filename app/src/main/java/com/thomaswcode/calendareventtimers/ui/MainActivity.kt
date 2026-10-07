@@ -2,7 +2,6 @@ package com.thomaswcode.calendareventtimers.ui
 
 import android.content.Intent
 import android.os.Bundle
-import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -40,10 +39,26 @@ enum class Page { LAUNCHER, TIMERS, BOOKING, MANAGE, SETTINGS, SETUP, LOG }
 /** Requests to change screen from outside Compose (the activity's intents). */
 object AppNav {
     val request = MutableStateFlow<Page?>(null)
+
+    /** The app sent the user to another screen itself (Android's settings, from the setup checklist). */
+    @Volatile
+    var awayOnPurpose = false
+
+    /**
+     * The screen to show as the app comes back into view: the launcher when the user opened it after
+     * it was out of sight ([wasStopped]), unless an Outlook run brought it back to a screen
+     * ([returnedTo]) or the user is back from a screen the app sent them to ([awayOnPurpose]).
+     */
+    fun pageOnResume(wasStopped: Boolean, returnedTo: Page?, awayOnPurpose: Boolean): Page? =
+        Page.LAUNCHER.takeIf { wasStopped && returnedTo == null && !awayOnPurpose }
 }
 
 class MainActivity : ComponentActivity() {
-    private var stoppedAt = 0L
+    /** Out of sight since the last onResume. */
+    private var stopped = false
+
+    /** The screen an Outlook run brought the app back to (onNewIntent), until onResume. */
+    private var returnedTo: Page? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,20 +73,30 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        pageFor(intent)?.let { AppNav.request.value = it }
+        pageFor(intent)?.let {
+            AppNav.request.value = it
+            returnedTo = it
+        }
     }
 
-    override fun onStart() {
-        super.onStart()
-        // Opened again after a while away: start from the choice of Timers or Room booking, unless a
-        // run is waiting to be reviewed.
-        val idle = ScanController.state.value is ScanController.State.Idle && BookingController.state.value is BookingController.State.Idle
-        if (stoppedAt > 0 && SystemClock.elapsedRealtime() - stoppedAt > AWAY_MS && idle) AppNav.request.value = Page.LAUNCHER
+    /**
+     * Opened by the user: start from the choice of Timers or Room booking (the user's answer to
+     * QUESTIONS.md Q14), wherever the app was. Not when the app brought itself back after an Outlook
+     * run (that run's screen, from onNewIntent, which always comes before onResume), nor on coming
+     * back from a settings screen the app opened. A run waiting to be reviewed is one tap away.
+     */
+    override fun onResume() {
+        super.onResume()
+        AppNav.pageOnResume(stopped, returnedTo, AppNav.awayOnPurpose)?.let { AppNav.request.value = it }
+        // Cleared on every resume, so neither carries over to the next time the user opens the app.
+        stopped = false
+        returnedTo = null
+        AppNav.awayOnPurpose = false
     }
 
     override fun onStop() {
         super.onStop()
-        stoppedAt = SystemClock.elapsedRealtime()
+        stopped = true
     }
 
     private fun pageFor(intent: Intent?): Page? = when (intent?.getStringExtra(OutlookSession.EXTRA_RETURN_TO)) {
@@ -93,9 +118,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private companion object {
-        const val AWAY_MS = 15 * 60_000L
-    }
 }
 
 @Composable
