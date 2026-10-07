@@ -64,6 +64,8 @@ object OutlookSelectors {
     const val TEXT_TIME_ZONE = "Time zone"
     const val TEXT_LOCATION = "Location"
     const val TEXT_ONLINE_MEETING = "Online Meeting"
+    /** Add People's address field while empty (seen on 2026-10-07). */
+    const val TEXT_PEOPLE_HINT = "Type a name or an email address"
     const val TEXT_DESCRIPTION = "Description"
     const val TEXT_ATTACHMENTS = "Attachments"
     const val TEXT_ALERT = "Alert"

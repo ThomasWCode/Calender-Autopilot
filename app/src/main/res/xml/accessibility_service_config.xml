@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- packageNames limits the service to Outlook, so it never sees other apps. flagReportViewIds is
      essential (viewIdResourceName is null without it); flagIncludeNotImportantViews makes the tree
-     match the uiautomator dumps the readers are tested against. -->
+     match the uiautomator dumps the readers are tested against. Every event type is taken (and
+     ignored), because Android's cache of Outlook's screen for this service is only updated by the
+     events it takes: without scroll and text events, a time wheel moved by the app went on reading
+     its old value (seen on the phone, 2026-10-07). -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityEventTypes="typeAllMask"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews|flagInputMethodEditor"
     android:canPerformGestures="true"
     android:canRetrieveWindowContent="true"
     android:description="@string/accessibility_service_description"

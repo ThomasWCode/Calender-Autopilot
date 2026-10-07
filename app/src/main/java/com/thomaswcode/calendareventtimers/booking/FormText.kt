@@ -34,8 +34,14 @@ object FormText {
      * The form's or date wheel's day, e.g. "Mon 12 Oct" (September may read "Sept"), resolved to
      * the year that puts it nearest [near] and, when a weekday is shown, matches it.
      */
-    fun parseDate(text: String?, near: LocalDate): LocalDate? {
+    fun parseDate(text: String?, near: LocalDate, today: LocalDate = LocalDate.now()): LocalDate? {
         val t = cleanUiText(text) ?: return null
+        // The date wheel names the days around today (seen on 2026-10-07: "Yesterday", "Today", "Tomorrow").
+        when (t.lowercase()) {
+            "yesterday" -> return today.minusDays(1)
+            "today" -> return today
+            "tomorrow" -> return today.plusDays(1)
+        }
         val m = dayMonth.find(t) ?: return null
         val day = m.groupValues[1].toInt()
         val prefix = m.groupValues[2].take(3).lowercase()

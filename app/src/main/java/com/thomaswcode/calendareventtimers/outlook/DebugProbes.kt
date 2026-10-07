@@ -5,7 +5,11 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import com.thomaswcode.calendareventtimers.booking.DescriptionText
+import com.thomaswcode.calendareventtimers.calendar.CalendarStore
+import com.thomaswcode.calendareventtimers.calendar.TimeZones
 import com.thomaswcode.calendareventtimers.util.ScanLog
+import java.time.LocalDate
+import java.time.LocalTime
 import kotlinx.coroutines.delay
 
 /**
@@ -29,7 +33,7 @@ object DebugProbes {
     suspend fun run(service: AccessibilityService, intent: Intent) {
         val probe = intent.getStringExtra("probe") ?: "screen"
         val driver = UiDriver(service)
-        val root = driver.snapshot()
+        val root = driver.freshSnapshot()
         ScanLog.i("Probe '$probe'")
         when (probe) {
             "screen" -> describe(root)
@@ -50,7 +54,7 @@ object DebugProbes {
                     driver.scroll(wheel.picker, forward)
                 }
                 delay(800)
-                ScanLog.i("Probe wheel $index: action=$ok, '$before' → '${TimePickerReader.wheels(driver.snapshot()).getOrNull(index)?.value}'")
+                ScanLog.i("Probe wheel $index: action=$ok, '$before' → '${TimePickerReader.wheels(driver.freshSnapshot()).getOrNull(index)?.value}'")
             }
             "wheel_text" -> {
                 val index = intent.getIntExtra("wheel", 1)
@@ -58,7 +62,68 @@ object DebugProbes {
                 val input = wheel.input ?: return ScanLog.w("Probe: wheel $index has no input")
                 val ok = driver.setText(input, intent.getStringExtra("text") ?: "14")
                 delay(800)
-                ScanLog.i("Probe wheel $index text: set=$ok, now '${TimePickerReader.wheels(driver.snapshot()).getOrNull(index)?.value}'")
+                ScanLog.i("Probe wheel $index text: set=$ok, now '${TimePickerReader.wheels(driver.freshSnapshot()).getOrNull(index)?.value}'")
+            }
+            "people_type" -> {
+                // Typed through the service's input method, as a keyboard types.
+                val input = PeopleReader.input(root) ?: return ScanLog.w("Probe: no Add People screen")
+                driver.click(input, "address field")
+                driver.focus(input)
+                driver.setText(input, "")
+                delay(500)
+                val text = intent.getStringExtra("text") ?: "nobody@example.com,"
+                val ok = when (intent.getStringExtra("how")) {
+                    "each" -> driver.typeEach(text)
+                    "key" -> driver.type(text.trimEnd(',')) && driver.key(android.view.KeyEvent.KEYCODE_COMMA)
+                    "enter" -> driver.type(text.trimEnd(',')) && driver.key(android.view.KeyEvent.KEYCODE_ENTER)
+                    else -> driver.type(text)
+                }
+                delay(1_500)
+                val after = driver.freshSnapshot()
+                ScanLog.i("Probe people_type: typed=$ok, chips ${PeopleReader.chipCount(after)}: ${PeopleReader.chipAddresses(after)}, field '${PeopleReader.input(after)?.text}'")
+                ScanLog.dump("Probe people_type", after.calendarOnlyDump(maxText = 120))
+            }
+            "people_flow" -> {
+                // The booking's own people steps (BookingNavigator.typePeople / removePerson).
+                fun list(key: String) = intent.getStringExtra(key).orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() }
+                if (!PeopleReader.isOpen(root)) return ScanLog.w("Probe: no Add People screen")
+                val booker = BookingNavigator(OutlookNavigator(service, driver) {}, service)
+                runCatching { booker.probePeople(list("add"), list("remove")) }
+                    .onFailure { ScanLog.w("Probe people_flow failed: ${it.message}") }
+                val after = driver.freshSnapshot()
+                ScanLog.i("Probe people_flow: chips ${PeopleReader.chips(after).map { "${it.label}=${it.address}" }}, field '${PeopleReader.inputText(after)}'")
+            }
+            "create_event", "edit_event", "delete_event" -> {
+                // Test events (PHONE-CHECKS.md D): saved in Outlook, so delete each one afterwards.
+                fun time(key: String) = intent.getStringExtra(key)?.let { LocalTime.parse(it) }
+                val date = LocalDate.parse(intent.getStringExtra("date") ?: return ScanLog.w("Probe: --es date YYYY-MM-DD"))
+                val start = time("start") ?: return ScanLog.w("Probe: --es start HH:MM")
+                val end = time("end")
+                val title = intent.getStringExtra("title") ?: return ScanLog.w("Probe: --es title …")
+                val room = intent.getStringExtra("room")
+                val nav = OutlookNavigator(service, driver) { ScanLog.i("Probe step: $it") }
+                val booker = BookingNavigator(nav, service)
+                val outcome = when (probe) {
+                    "create_event" -> booker.probeCreateEvent(date, start, end ?: return ScanLog.w("Probe: --es end HH:MM"), title)
+                    "edit_event" -> booker.probeEditEvent(
+                        date, start, end, title, room, time("new_start"), time("new_end"), intent.getStringExtra("clear_location") == "yes",
+                    )
+                    else -> booker.deleteBooking(date, start, end, title, room)
+                }
+                ScanLog.i("Probe $probe '$title': $outcome")
+            }
+            "people_enter" -> {
+                // One address at a time, each followed by the keyboard's Enter (a set comma isn't typed).
+                for (address in (intent.getStringExtra("text") ?: "nobody@example.com").split(',').map { it.trim() }.filter { it.isNotEmpty() }) {
+                    val input = PeopleReader.input(driver.freshSnapshot()) ?: return ScanLog.w("Probe: no Add People screen")
+                    driver.focus(input)
+                    val set = driver.setText(input, address)
+                    delay(800)
+                    val enter = driver.imeEnter(PeopleReader.input(driver.freshSnapshot()) ?: input)
+                    delay(1_500)
+                    val after = driver.freshSnapshot()
+                    ScanLog.i("Probe people_enter '$address': set=$set enter=$enter, chips ${PeopleReader.chipCount(after)}: ${PeopleReader.chipAddresses(after)}, field '${PeopleReader.input(after)?.text}'")
+                }
             }
             "people" -> {
                 val input = PeopleReader.input(root) ?: return ScanLog.w("Probe: no Add People screen")
@@ -76,7 +141,12 @@ object DebugProbes {
                 val ok = if (probe == "paste") {
                     service.getSystemService(ClipboardManager::class.java)
                         .setPrimaryClip(ClipData.newHtmlText("Probe", DescriptionText.plain(html), html))
-                    driver.paste(DescriptionReader.editor(driver.snapshot()) ?: editor)
+                    when (intent.getStringExtra("how")) {
+                        "ime" -> driver.imePaste()
+                        else -> driver.paste(DescriptionReader.editor(driver.snapshot()) ?: editor)
+                    }
+                } else if (intent.getStringExtra("how") == "type") {
+                    driver.type(DescriptionText.plain(html))
                 } else {
                     driver.setText(DescriptionReader.editor(driver.snapshot()) ?: editor, DescriptionText.plain(html))
                 }
@@ -88,7 +158,18 @@ object DebugProbes {
                 val mode = if (intent.getStringExtra("mode") == "hidden") AccessibilityService.SHOW_MODE_HIDDEN else AccessibilityService.SHOW_MODE_AUTO
                 ScanLog.i("Probe keyboard: ${service.softKeyboardController.setShowMode(mode)}")
             }
-            else -> ScanLog.w("Probe '$probe' unknown: screen, title, wheel_step, wheel_text, people, paste, set_description, keyboard")
+            "zones" -> {
+                // Which time zones of the main calendar's events Android knows; an unknown one makes the
+                // provider repeat events in GMT (CalendarRows.events corrects the known aliases).
+                val store = CalendarStore(service)
+                val main = store.mainCalendar() ?: return ScanLog.w("Probe: no main calendar")
+                store.timeZones(main).forEach { (id, count) ->
+                    val tz = java.util.TimeZone.getTimeZone(id).id
+                    val jt = runCatching { java.time.ZoneId.of(id).id }.getOrElse { "unknown" }
+                    ScanLog.i("Probe zone '$id' (${count.first} events, ${count.second} repeating): TimeZone=$tz, java.time=$jt, provider knows=${TimeZones.known(id)}")
+                }
+            }
+            else -> ScanLog.w("Probe '$probe' unknown: screen, title, wheel_step, wheel_text, people, paste, set_description, keyboard, zones")
         }
     }
 

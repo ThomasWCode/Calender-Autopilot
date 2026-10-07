@@ -1,9 +1,11 @@
 package com.thomaswcode.calendareventtimers.ui
 
 import android.Manifest
+import android.app.Activity
 import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioManager
@@ -121,13 +123,24 @@ object SetupChecks {
             SetupAction.EXACT_ALARMS -> listOf(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, pkg))
             SetupAction.SOUND -> listOf(Intent(Settings.ACTION_SOUND_SETTINGS))
         } + Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg)
+        // From the app's own screen, Settings opens in the app's task: Back returns to the app, and
+        // opening the app from the launcher meanwhile shows Settings again, not the app behind it,
+        // so coming back from Settings can't be taken for opening the app (QUESTIONS.md Q14).
+        val activity = context.findActivity()
         for (intent in intents) {
             try {
-                context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                AppNav.awayOnPurpose = true
+                if (activity != null) activity.startActivity(intent) else context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 return
             } catch (e: Exception) {
                 ScanLog.w("Couldn't open ${intent.action}: ${e.message}")
             }
         }
     }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

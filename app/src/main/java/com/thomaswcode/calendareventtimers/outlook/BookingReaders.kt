@@ -45,6 +45,7 @@ import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors.TEXT_DISCARD
 import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors.TEXT_DISCARD_PROMPT
 import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors.TEXT_LOCATION
 import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors.TEXT_ONLINE_MEETING
+import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors.TEXT_PEOPLE_HINT
 import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors.TEXT_PEOPLE
 import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors.TEXT_TIME_PREFIX
 import com.thomaswcode.calendareventtimers.outlook.OutlookSelectors.TEXT_TIME_ZONE
@@ -138,6 +139,15 @@ object EventFormReader {
     }
 
     fun alertRow(root: UiNode): FormRow? = row(root, TEXT_ALERT)
+
+    /** The Online Meeting (Zoom) switch: the switch row right after "Online Meeting" (off by default). */
+    fun onlineMeetingSwitch(root: UiNode): UiNode? {
+        val rows = rows(root)
+        val online = rows.indexOfFirst { it.label.equals(TEXT_ONLINE_MEETING, ignoreCase = true) }
+        if (online < 0) return null
+        rows[online].node.find { it.checkable }?.let { return it }
+        return rows.getOrNull(online + 1)?.node?.takeIf { it.checkable }
+    }
 
     fun deleteRow(root: UiNode): FormRow? = row(root, TEXT_DELETE_EVENT)
 }
@@ -239,6 +249,27 @@ object PeopleReader {
 
     fun input(root: UiNode): UiNode? = root.byId(PEOPLE_ROOT)?.find { it.viewId == PEOPLE_INPUT }
 
+    /** What is typed in the address field: "" while it shows its placeholder. */
+    fun inputText(root: UiNode): String =
+        cleanUiText(input(root)?.text).orEmpty().takeUnless { it.equals(TEXT_PEOPLE_HINT, ignoreCase = true) }.orEmpty()
+
+    /** One chip: the node to tap, its label (description, else text) and the address it shows, if any. */
+    class Chip(val node: UiNode, val label: String, val address: String?)
+
+    /** The chips, in order: the innermost clickable layout around each #contact_chip_text. */
+    fun chips(root: UiNode): List<Chip> {
+        val people = root.byId(PEOPLE_ROOT) ?: return emptyList()
+        val around = people.findAll { n -> n.clickable && n.find { it.viewId == CONTACT_CHIP_TEXT } != null }
+        // Not a layout holding a chip (or the only chip) that is itself clickable.
+        val innermost = around.filter { c -> around.none { o -> o !== c && c.find { it === o } != null } }
+        return innermost.map { n ->
+            val text = cleanUiText(n.find { it.viewId == CONTACT_CHIP_TEXT }?.text).orEmpty()
+            val desc = cleanUiText(n.desc).orEmpty()
+            val addr = address.find(desc)?.groupValues?.get(1) ?: text.takeIf { it.contains('@') && !it.contains(' ') }
+            Chip(n, desc.ifEmpty { text }, addr?.lowercase())
+        }
+    }
+
     fun requiredTab(root: UiNode): UiNode? = root.byId(PEOPLE_REQUIRED_TAB)
 
     /** Addresses on the chips (lower case): from the chip's description `<a@b.c>`, else its text. */
@@ -250,6 +281,19 @@ object PeopleReader {
         return (fromDesc + fromText).distinct()
     }
 
+    /**
+     * Chips that are neither on the form [before] (counts by label) nor an address in [want]. New
+     * chips come after the old ones, so of chips sharing a label the first ones are taken as old.
+     */
+    fun strays(chips: List<Chip>, before: Map<String, Int>, want: Collection<String>): List<Chip> {
+        val seen = HashMap<String, Int>()
+        return chips.filter { c ->
+            val n = (seen[c.label] ?: 0) + 1
+            seen[c.label] = n
+            c.address !in want && n > (before[c.label] ?: 0)
+        }
+    }
+
     fun chipCount(root: UiNode): Int = root.findAll { it.viewId == CONTACT_CHIP_TEXT }.size
 
     fun doneButton(root: UiNode): UiNode? = root.byId(PEOPLE_ROOT)?.find { it.viewId == ACTION_DONE }
@@ -259,7 +303,9 @@ object PeopleReader {
 object DescriptionReader {
     fun isOpen(root: UiNode): Boolean = root.visibleId(DESCRIPTION_EDITOR) || root.visibleId(DESCRIPTION_FIELD)
 
-    fun webView(root: UiNode): UiNode? = root.byId(DESCRIPTION_EDITOR)
+    /** The editor's WebView; it doesn't always carry its id (seen on 2026-10-07), so also the WebView inside the field. */
+    fun webView(root: UiNode): UiNode? =
+        root.byId(DESCRIPTION_EDITOR) ?: root.byId(DESCRIPTION_FIELD)?.find { it.shortClass == "WebView" }
 
     /** The editable node inside the WebView (the service sees it; dumps don't), else the WebView itself. */
     fun editor(root: UiNode): UiNode? = webView(root)?.let { wv -> wv.find { it !== wv && it.editable } ?: wv }
