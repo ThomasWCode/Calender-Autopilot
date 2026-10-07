@@ -8,6 +8,8 @@ import com.thomaswcode.calendareventtimers.booking.DescriptionText
 import com.thomaswcode.calendareventtimers.calendar.CalendarStore
 import com.thomaswcode.calendareventtimers.calendar.TimeZones
 import com.thomaswcode.calendareventtimers.util.ScanLog
+import java.time.LocalDate
+import java.time.LocalTime
 import kotlinx.coroutines.delay
 
 /**
@@ -90,6 +92,25 @@ object DebugProbes {
                     .onFailure { ScanLog.w("Probe people_flow failed: ${it.message}") }
                 val after = driver.freshSnapshot()
                 ScanLog.i("Probe people_flow: chips ${PeopleReader.chips(after).map { "${it.label}=${it.address}" }}, field '${PeopleReader.inputText(after)}'")
+            }
+            "create_event", "edit_event", "delete_event" -> {
+                // Test events (PHONE-CHECKS.md D): saved in Outlook, so delete each one afterwards.
+                fun time(key: String) = intent.getStringExtra(key)?.let { LocalTime.parse(it) }
+                val date = LocalDate.parse(intent.getStringExtra("date") ?: return ScanLog.w("Probe: --es date YYYY-MM-DD"))
+                val start = time("start") ?: return ScanLog.w("Probe: --es start HH:MM")
+                val end = time("end")
+                val title = intent.getStringExtra("title") ?: return ScanLog.w("Probe: --es title …")
+                val room = intent.getStringExtra("room")
+                val nav = OutlookNavigator(service, driver) { ScanLog.i("Probe step: $it") }
+                val booker = BookingNavigator(nav, service)
+                val outcome = when (probe) {
+                    "create_event" -> booker.probeCreateEvent(date, start, end ?: return ScanLog.w("Probe: --es end HH:MM"), title)
+                    "edit_event" -> booker.probeEditEvent(
+                        date, start, end, title, room, time("new_start"), time("new_end"), intent.getStringExtra("clear_location") == "yes",
+                    )
+                    else -> booker.deleteBooking(date, start, end, title, room)
+                }
+                ScanLog.i("Probe $probe '$title': $outcome")
             }
             "people_enter" -> {
                 // One address at a time, each followed by the keyboard's Enter (a set comma isn't typed).

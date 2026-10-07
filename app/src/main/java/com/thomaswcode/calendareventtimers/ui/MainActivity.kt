@@ -2,7 +2,6 @@ package com.thomaswcode.calendareventtimers.ui
 
 import android.content.Intent
 import android.os.Bundle
-import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -42,20 +41,13 @@ object AppNav {
     val request = MutableStateFlow<Page?>(null)
 
     /**
-     * When the app last sent the user to a screen itself (Android's settings, from the setup
-     * checklist), as SystemClock.elapsedRealtime(); 0: not since it last came back.
+     * The app sent the user to a screen itself (Android's settings, from the setup checklist), and
+     * hasn't come back since. Settings opens in the app's own task, so opening the app from the
+     * launcher meanwhile shows Settings, not the app: the next resume is the way back from there,
+     * however long that took.
      */
     @Volatile
-    var awayAt = 0L
-
-    /**
-     * Coming back within this long of [awayAt] counts as coming back from that screen. Settings
-     * normally opens in the app's own task, so opening the app from the launcher can't come back
-     * past it; this limits the case of a settings screen that opens in a task of its own anyway.
-     */
-    const val AWAY_MAX_MS = 15 * 60_000L
-
-    fun awayOnPurpose(now: Long): Boolean = awayAt != 0L && now - awayAt in 0..AWAY_MAX_MS
+    var awayOnPurpose = false
 
     /**
      * The screen to show as the app comes back into view: the launcher when the user opened it after
@@ -100,11 +92,11 @@ class MainActivity : ComponentActivity() {
      */
     override fun onResume() {
         super.onResume()
-        AppNav.pageOnResume(stopped, returnedTo, AppNav.awayOnPurpose(SystemClock.elapsedRealtime()))?.let { AppNav.request.value = it }
+        AppNav.pageOnResume(stopped, returnedTo, AppNav.awayOnPurpose)?.let { AppNav.request.value = it }
         // Cleared on every resume, so none carries over to the next time the user opens the app.
         stopped = false
         returnedTo = null
-        AppNav.awayAt = 0L
+        AppNav.awayOnPurpose = false
     }
 
     override fun onStop() {
