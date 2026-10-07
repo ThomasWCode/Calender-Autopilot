@@ -1,10 +1,12 @@
 package com.thomaswcode.calendareventtimers
 
 import com.thomaswcode.calendareventtimers.booking.FormText
+import com.thomaswcode.calendareventtimers.calendar.CalEvent
 import com.thomaswcode.calendareventtimers.calendar.CalendarRows
 import com.thomaswcode.calendareventtimers.calendar.TimeZones
 import com.thomaswcode.calendareventtimers.engine.CachedLabels
 import com.thomaswcode.calendareventtimers.engine.LabelCachePolicy
+import com.thomaswcode.calendareventtimers.engine.LabelTargets
 import com.thomaswcode.calendareventtimers.outlook.Box
 import com.thomaswcode.calendareventtimers.outlook.DescriptionReader
 import com.thomaswcode.calendareventtimers.outlook.EventFormReader
@@ -23,6 +25,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** What the phone checks of 2026-10-07 found, and the fixes for it. */
@@ -165,5 +168,80 @@ class LauncherOnOpenTest {
         assertNull(AppNav.pageOnResume(wasStopped = true, returnedTo = null, awayOnPurpose = true))
         // Only paused (a dialog over it): nothing changes.
         assertNull(AppNav.pageOnResume(wasStopped = false, returnedTo = null, awayOnPurpose = false))
+    }
+}
+
+/** Codex's first review of the phone-check fixes. */
+class PhoneChecksReviewTest {
+    private fun event(key: String, day: Int, h: Int) = CalEvent(
+        eventId = key.hashCode().toLong(), syncId = key, changeKey = "k", originalSyncId = null, recurring = true, title = key,
+        begin = ZonedDateTime.of(2026, 10, day, h, 0, 0, 0, ProviderRows.london).toInstant(),
+        end = ZonedDateTime.of(2026, 10, day, h + 1, 0, 0, 0, ProviderRows.london).toInstant(),
+        date = LocalDate.of(2026, 10, day), start = LocalTime.of(h, 0), endDate = LocalDate.of(2026, 10, day), endTime = LocalTime.of(h + 1, 0),
+        allDay = false, location = null, organizer = null, selfStatus = 0, cancelled = false,
+    )
+
+    @Test
+    fun anAbsentOccurrenceLeavesItsSeriesToBeReadElsewhere() {
+        val events = listOf(event("series", 12, 9), event("series", 13, 9), event("series", 14, 9), event("other", 12, 11))
+        val first = LabelTargets.choose(events)
+        val phantom = first.single { it.labelKey == "series" }
+        assertEquals(events[0].occurrenceKey, phantom.occurrenceKey)
+        // The chosen occurrence wasn't in Outlook: the series is read at another occurrence.
+        val next = LabelTargets.retry(events, emptySet(), first, listOf(phantom))
+        assertEquals(listOf(events[1].occurrenceKey), next.map { it.occurrenceKey })
+        // Nor at one known to be absent already.
+        assertEquals(listOf(events[2].occurrenceKey), LabelTargets.retry(events, setOf(events[1].occurrenceKey), first, listOf(phantom)).map { it.occurrenceKey })
+        // Read (or a problem reported) at another occurrence: done.
+        assertTrue(LabelTargets.retry(events, emptySet(), first + next, listOf(phantom)).isEmpty())
+        assertTrue(LabelTargets.retry(events, emptySet(), first, emptyList()).isEmpty())
+        // Absence is kept under the occurrence, never the series' label key.
+        assertEquals("absent:" + events[0].occurrenceKey, LabelCachePolicy.absentKey(phantom.occurrenceKey))
+    }
+
+    @Test
+    fun occurrencesMovedAcrossMidnightAreKeptOrDropped() {
+        val la = ZoneId.of("America/Los_Angeles")
+        val london = ProviderRows.london
+        // 15:30 Pacific, first in winter: 23:30 UTC. In July the provider (repeating it in GMT) still
+        // says 23:30 UTC, 00:30 on the 7th in London; corrected, it is 23:30 on the 6th.
+        val dtstart = ZonedDateTime.of(2026, 1, 5, 15, 30, 0, 0, la).toInstant().toEpochMilli()
+        val bad = ZonedDateTime.of(2026, 7, 7, 0, 30, 0, 0, london).toInstant()
+        val rows = listOf(
+            ProviderRows.instance(1, "Late series", bad.toEpochMilli().toString(), bad.plusSeconds(1800).toEpochMilli().toString(),
+                "rrule" to "FREQ=WEEKLY", "eventTimezone" to "US/Pacific-New", "dtstart" to dtstart.toString()),
+        )
+        val out = CalendarRows.events(rows, mapOf(1L to ProviderRows.event(1, "a", "k")), london) { it != "US/Pacific-New" }
+        assertEquals(LocalDate.of(2026, 7, 6), out.single().date)
+        assertEquals(LocalTime.of(23, 30), out.single().start)
+        // Found only by asking the provider beyond the day, then kept for the 6th, not the 7th.
+        val jul6 = LocalDate.of(2026, 7, 6).atStartOfDay(london).toInstant()
+        val jul7 = LocalDate.of(2026, 7, 7).atStartOfDay(london).toInstant()
+        assertEquals(1, CalendarRows.within(out, jul6, jul7).size)
+        assertTrue(CalendarRows.within(out, jul7.plusSeconds(3_600), jul7.plusSeconds(86_400)).isEmpty())
+    }
+
+    @Test
+    fun aNewChipLookingLikeAnOldOneIsStillAStray() {
+        fun chip(label: String, address: String?) = PeopleReader.Chip(XmlNode(null, null, label, null, true, false, false, Box(0, 0, 1, 1), emptyList()), label, address)
+        val old = chip("Sam Jones", null)
+        val newSam = chip("Sam Jones", null)
+        val asked = chip("<a@lshtm.ac.uk>", "a@lshtm.ac.uk")
+        val before = mapOf("Sam Jones" to 1)
+        assertEquals(listOf(newSam), PeopleReader.strays(listOf(old, asked, newSam), before, listOf("a@lshtm.ac.uk")))
+        assertTrue(PeopleReader.strays(listOf(old, asked), before, listOf("a@lshtm.ac.uk")).isEmpty())
+    }
+
+    @Test
+    fun backFromSettingsCountsForAWhileOnly() {
+        try {
+            AppNav.awayAt = 1_000L
+            assertTrue(AppNav.awayOnPurpose(1_000L + 60_000L))
+            assertFalse(AppNav.awayOnPurpose(1_000L + AppNav.AWAY_MAX_MS + 1))
+            AppNav.awayAt = 0L
+            assertFalse(AppNav.awayOnPurpose(5_000L))
+        } finally {
+            AppNav.awayAt = 0L
+        }
     }
 }

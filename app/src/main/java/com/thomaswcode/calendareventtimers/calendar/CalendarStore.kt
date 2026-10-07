@@ -9,6 +9,7 @@ import android.net.Uri
 import android.provider.CalendarContract
 import androidx.core.content.ContextCompat
 import com.thomaswcode.calendareventtimers.util.ScanLog
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -37,11 +38,15 @@ class CalendarStore(context: Context) {
         }
     }
 
-    /** Occurrences in the main calendar overlapping [from, to), in start order. */
+    /**
+     * Occurrences in the main calendar overlapping [from, to), in start order. The provider is asked
+     * for a day more on each side: an occurrence [CalendarRows.events] moves back to its clock time
+     * (an unknown time zone) may only then fall inside the range.
+     */
     fun occurrences(calendar: ProviderCalendar, from: Instant, to: Instant, zone: ZoneId): List<CalEvent> {
         val uri = CalendarContract.Instances.CONTENT_URI.buildUpon().also {
-            ContentUris.appendId(it, from.toEpochMilli())
-            ContentUris.appendId(it, to.toEpochMilli())
+            ContentUris.appendId(it, from.minus(QUERY_PAD).toEpochMilli())
+            ContentUris.appendId(it, to.plus(QUERY_PAD).toEpochMilli())
         }.build()
         val instances = query(
             uri,
@@ -56,7 +61,7 @@ class CalendarStore(context: Context) {
             CalendarContract.Events.CONTENT_URI, "_id", ids,
             arrayOf("_id", "_sync_id", "sync_data3", "original_sync_id", "original_id", "eventStatus", "deleted"),
         ).associateBy { it["_id"]!!.toLong() }
-        return CalendarRows.events(instances, events, zone)
+        return CalendarRows.within(CalendarRows.events(instances, events, zone), from, to)
     }
 
     /** Debug probe: the main calendar's time zones, with how many events and repeating events use each. */
@@ -109,6 +114,9 @@ class CalendarStore(context: Context) {
     }
 
     companion object {
+        /** More than any clock change [TimeZones.correct] can move an occurrence by. */
+        private val QUERY_PAD: Duration = Duration.ofDays(1)
+
         fun hasAccess(context: Context): Boolean =
             ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
     }
