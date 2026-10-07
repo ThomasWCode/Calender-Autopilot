@@ -51,6 +51,13 @@ object CalendarRows {
     private fun isWork(address: String?): Boolean = address != null && People.isLshtmPerson(address.trim())
 
     /**
+     * The occurrences overlapping [from]..[to] as the provider counts overlap (both ends included),
+     * once [events] has corrected their times: the provider was asked for a wider range.
+     */
+    fun within(events: List<CalEvent>, from: Instant, to: Instant): List<CalEvent> =
+        events.filter { !it.begin.isAfter(to) && !it.end.isBefore(from) }
+
+    /**
      * Occurrences from the `instances` table, completed with sync columns from the `events` table
      * ([eventRows] by `_id`). Occurrences whose event row is missing or deleted are dropped. A
      * repeating event in a time zone Android doesn't know ([knownToAndroid]) is corrected

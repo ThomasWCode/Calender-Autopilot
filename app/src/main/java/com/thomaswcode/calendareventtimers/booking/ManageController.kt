@@ -84,7 +84,13 @@ object ManageController {
         val app = context.applicationContext
         Prefs.ensureLoaded(app)
         val store = BookingStore.get(app)
-        runCatching { store.refreshReplies(Instant.now(), zone) }
+        try {
+            store.refreshReplies(Instant.now(), zone)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ScanLog.e("Reading room replies failed", e)
+        }
         val today = LocalDate.now(zone)
         val bookings = store.savedFrom(today)
         val calendar = CalendarStore(app)

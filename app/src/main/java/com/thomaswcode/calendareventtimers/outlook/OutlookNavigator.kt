@@ -30,9 +30,10 @@ sealed interface LabelRead {
     data class Problem(val message: String) : LabelRead
 
     /**
-     * The Day view, loaded, shows no event of that title at that time: the phone's calendar has an
-     * event Outlook doesn't (seen on 2026-10-07: a series moved to another day left behind in the
-     * provider). Remembered for a while, so it isn't looked for again on every run.
+     * The Day view, loaded and showing the phone's other events of that day, has no event of that
+     * title at that time: the phone's calendar has an occurrence Outlook doesn't (seen on
+     * 2026-10-07: a series moved to another day left behind in the provider). Remembered for a
+     * while, so it isn't looked for again on every run.
      */
     data class Absent(val message: String) : LabelRead
 }
@@ -71,34 +72,51 @@ class OutlookNavigator(
      * Opens each target event and reads its labels, visiting the days in date order. [expected]
      * are the provider's events per day, compared with the Day view on every day visited anyway
      * (only logged: it shows calendars or sync gaps the provider misses). Results go into [out]
-     * as they are read, so a run that stops part-way keeps what it read.
+     * as they are read, so a run that stops part-way keeps what it read. Then [more] gives targets
+     * to read next, from what was read (another occurrence of a series whose chosen one was absent),
+     * until it gives none.
      */
     suspend fun readLabels(
         targets: List<LabelTarget>,
         expected: Map<LocalDate, List<CalEvent>> = emptyMap(),
         out: MutableMap<LabelTarget, LabelRead> = LinkedHashMap(),
+        more: (Map<LabelTarget, LabelRead>) -> List<LabelTarget> = { emptyList() },
     ): Map<LabelTarget, LabelRead> {
         if (targets.isEmpty()) return out
         launchOutlook()
         openCalendar()
         ensureDayView()
+        var round = targets
+        var total = targets.size
+        var rounds = 0
+        while (round.isNotEmpty()) {
+            readRound(round, expected, out, total)
+            if (++rounds >= MAX_LABEL_ROUNDS) break
+            round = more(out).filter { it !in out }
+            total += round.size
+        }
+        val read = out.values.count { it is LabelRead.Read }
+        ScanLog.i("Labels read in Outlook: $read of ${out.size}")
+        return out
+    }
+
+    private suspend fun readRound(targets: List<LabelTarget>, expected: Map<LocalDate, List<CalEvent>>, out: MutableMap<LabelTarget, LabelRead>, total: Int) {
         for ((date, dayTargets) in targets.groupBy { it.date }.toSortedMap()) {
             goToDate(date)
             waitForDay(date)
-            expected[date]?.let { crossCheck(date, it) }
+            // How many of the phone's events this day the Day view shows: none, and a missing block
+            // proves nothing (Outlook may be hiding the calendar).
+            val shown = expected[date]?.let { crossCheck(date, it) } ?: 0
             // Events sharing a start and a title look the same in the Day view, so they are read together.
             val slots = dayTargets.groupBy { it.start to CalEvent.normaliseTitle(it.title) }
             for (slot in slots.keys.sortedWith(compareBy({ it.first }, { it.second }))) {
                 val group = slots.getValue(slot)
-                onProgress("Reading labels ${out.size + 1} of ${targets.size}: ${group.first().title}")
+                onProgress("Reading labels ${out.size + 1} of $total: ${group.first().title}")
                 val twins = maxOf(LabelSlots.twins(expected[date], date, slot.first, slot.second) ?: 0, group.size)
-                val read = readSlot(group.first(), twins)
+                val read = readSlot(group.first(), twins, othersShown = shown > 0)
                 group.forEach { out[it] = read }
             }
         }
-        val read = out.values.count { it is LabelRead.Read }
-        ScanLog.i("Labels read in Outlook: $read of ${targets.size}")
-        return out
     }
 
     // ---- Navigation, also used by BookingNavigator ----
@@ -339,11 +357,17 @@ class OutlookNavigator(
      * open as exactly this event. When the calendar has [twins] such events, nothing on the Day
      * view says which block is which, so [LabelSlots.decide] only gives labels all of them share.
      */
-    private suspend fun readSlot(t: LabelTarget, twins: Int): LabelRead {
+    private suspend fun readSlot(t: LabelTarget, twins: Int, othersShown: Boolean): LabelRead {
         val time = TriggerTime.formatHhMm(t.start)
         ensureOnDay(t.date)
         val count = min(findBlocks(t.date, t.start, t.title).size, MAX_SLOT_BLOCKS)
-        if (count == 0) return LabelRead.Absent("${t.title} ($time): in the phone's calendar but not in Outlook")
+        if (count == 0) {
+            return if (othersShown) {
+                LabelRead.Absent("${t.title} ($time): in the phone's calendar but not in Outlook")
+            } else {
+                LabelRead.Problem("${t.title} ($time): Outlook's Day view shows none of the phone's events that day (is the calendar hidden in Outlook?)")
+            }
+        }
         val exact = ArrayList<LabelRead.Read>()
         val unreadable = ArrayList<String>()
         var other: String? = null
@@ -409,8 +433,11 @@ class OutlookNavigator(
         return emptyList()
     }
 
-    /** Logs differences between the Day view's timed events and the provider's for [date]. */
-    private fun crossCheck(date: LocalDate, expected: List<CalEvent>) {
+    /**
+     * Logs differences between the Day view's timed events and the provider's for [date]; returns
+     * how many of the provider's timed events the Day view shows.
+     */
+    private fun crossCheck(date: LocalDate, expected: List<CalEvent>): Int {
         val blocks = CalendarReader.eventBlocks(driver.snapshot())
             .mapNotNull { b -> EventParser.startTimeIfStartsOn(b.desc, date)?.let { it to b.desc } }
         val timed = expected.filter { !it.allDay && it.date == date }
@@ -424,6 +451,7 @@ class OutlookNavigator(
                     "only in the Day view: ${notInProvider.joinToString { (s, d) -> "$s ${EventParser.titleFromDesc(d) ?: d.take(30)}" }.ifEmpty { "-" }}",
             )
         }
+        return timed.size - notInOutlook.size
     }
 
     // ---- Opening and reading an event's details ----
@@ -567,6 +595,9 @@ class OutlookNavigator(
 
         /** Blocks opened at most for one slot (a title that is part of other titles at the same time). */
         const val MAX_SLOT_BLOCKS = 6
+
+        /** Rounds of [readLabels]: the targets, then other occurrences of series found absent. */
+        const val MAX_LABEL_ROUNDS = 3
     }
 }
 

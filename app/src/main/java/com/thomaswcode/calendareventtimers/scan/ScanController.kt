@@ -13,9 +13,9 @@ import com.thomaswcode.calendareventtimers.domain.ReviewItem
 import com.thomaswcode.calendareventtimers.domain.ScannedEvent
 import com.thomaswcode.calendareventtimers.domain.TriggerTime
 import com.thomaswcode.calendareventtimers.domain.cleanUiText
-import com.thomaswcode.calendareventtimers.engine.LabelCachePolicy
 import com.thomaswcode.calendareventtimers.engine.LabelPass
 import com.thomaswcode.calendareventtimers.engine.LabelTarget
+import com.thomaswcode.calendareventtimers.engine.LabelTargets
 import com.thomaswcode.calendareventtimers.outlook.AppScope
 import com.thomaswcode.calendareventtimers.outlook.LabelRead
 import com.thomaswcode.calendareventtimers.outlook.OutlookBusy
@@ -168,20 +168,26 @@ object ScanController {
         ScanLog.i("${EventParser.dayLabel(target)}: ${upcoming.size} event(s) to check, ${plan.remembered} label(s) remembered, ${plan.targets.size} to read in Outlook")
 
         val reads = LinkedHashMap<LabelTarget, LabelRead>()
-        val failure: String? = if (plan.targets.isEmpty()) null else readInOutlook(plan.targets, all, reads)
+        // A series whose chosen occurrence isn't in Outlook is read at another of its occurrences.
+        val more = { r: Map<LabelTarget, LabelRead> ->
+            LabelTargets.retry(upcoming, plan.absent, r.keys, r.filterValues { it is LabelRead.Absent }.keys)
+        }
+        val failure: String? = if (plan.targets.isEmpty()) null else readInOutlook(plan.targets, all, reads, more)
         withContext(NonCancellable) {
             val read = reads.mapNotNull { (t, r) -> (r as? LabelRead.Read)?.let { t to it.categories } }.toMap()
-            // In the phone's calendar but not in Outlook: remembered, and quietly left out.
+            // Occurrences in the phone's calendar but not in Outlook: remembered, and quietly left out.
             val absent = reads.filterValues { it is LabelRead.Absent }.keys
             absent.forEach { ScanLog.i("Not in Outlook, left out: ${it.title} (${TriggerTime.formatHhMm(it.start)})") }
+            if (plan.absent.isNotEmpty()) ScanLog.i("${plan.absent.size} event(s) found missing from Outlook lately, left out")
+            val gone = plan.absent + absent.map { it.occurrenceKey }
             // The cache proved unreliable: what it gave this run is left out too.
             val distrusted = labels.remember(read, Instant.now(), absent) && plan.known.isNotEmpty()
             val reused = if (distrusted) emptyMap() else plan.known
             val known = reused + read.mapKeys { it.key.labelKey }
-            val events = upcoming.mapNotNull { e ->
+            val events = upcoming.filterNot { it.occurrenceKey in gone }.mapNotNull { e ->
                 // Cleaned as Outlook's screens are (bidi marks, non-breaking spaces), so an alarm set by
                 // a whole-day scan is recognised as this event's, not set twice.
-                known[e.labelKey]?.takeUnless { LabelCachePolicy.isAbsent(it) }?.let { cats ->
+                known[e.labelKey]?.let { cats ->
                     ScannedEvent(cleanUiText(e.title).orEmpty(), e.date, e.start, cleanUiText(e.location)?.ifEmpty { null }, cats)
                 }
             }
@@ -200,7 +206,10 @@ object ScanController {
     }
 
     /** Reads [targets]' labels in Outlook into [into]; returns why it stopped early, or null. */
-    private suspend fun readInOutlook(targets: List<LabelTarget>, all: List<CalEvent>, into: MutableMap<LabelTarget, LabelRead>): String? {
+    private suspend fun readInOutlook(
+        targets: List<LabelTarget>, all: List<CalEvent>, into: MutableMap<LabelTarget, LabelRead>,
+        more: (Map<LabelTarget, LabelRead>) -> List<LabelTarget>,
+    ): String? {
         val service = OutlookReaderService.instance
             ?: return "${targets.size} event(s) need their labels read in Outlook: turn on the Outlook reader (Settings → Accessibility)."
         step("Reading labels in Outlook…")
@@ -211,7 +220,7 @@ object ScanController {
                     session.progress(s)
                 }
                 withTimeout(SCAN_TIMEOUT_MS) {
-                    navigator.readLabels(targets, all.groupBy { it.date }, into)
+                    navigator.readLabels(targets, all.groupBy { it.date }, into, more)
                 }
             }
         }

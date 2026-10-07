@@ -6,9 +6,9 @@ import com.thomaswcode.calendareventtimers.calendar.CalendarStore
 import com.thomaswcode.calendareventtimers.calendar.ProviderCalendar
 import com.thomaswcode.calendareventtimers.data.AnswerKind
 import com.thomaswcode.calendareventtimers.data.BookingStore
-import com.thomaswcode.calendareventtimers.engine.LabelCachePolicy
 import com.thomaswcode.calendareventtimers.engine.LabelPass
 import com.thomaswcode.calendareventtimers.engine.LabelTarget
+import com.thomaswcode.calendareventtimers.engine.LabelTargets
 import com.thomaswcode.calendareventtimers.outlook.AppScope
 import com.thomaswcode.calendareventtimers.outlook.BookingJob
 import com.thomaswcode.calendareventtimers.outlook.BookingNavigator
@@ -159,16 +159,23 @@ object BookingController {
                         step(s)
                         session.progress(s)
                     }
-                    withTimeout(LABEL_TIMEOUT_MS) { navigator.readLabels(labelPlan.targets, events.groupBy { it.date }, reads) }
+                    // A series whose chosen occurrence isn't in Outlook is read at another of its occurrences.
+                    val more = { r: Map<LabelTarget, LabelRead> ->
+                        LabelTargets.retry(candidates, labelPlan.absent, r.keys, r.filterValues { it is LabelRead.Absent }.keys)
+                    }
+                    withTimeout(LABEL_TIMEOUT_MS) { navigator.readLabels(labelPlan.targets, events.groupBy { it.date }, reads, more) }
                 }
             }
             if (stopped == STOPPED) return State.Failed(range, "Stopped.")
             if (stopped != null) problems += "Reading labels stopped early: $stopped"
         }
         val read = reads.mapNotNull { (t, r) -> (r as? LabelRead.Read)?.let { t to it.categories } }.toMap()
-        // In the phone's calendar but not in Outlook: remembered, and counted as unlabelled (never offered).
+        // Occurrences in the phone's calendar but not in Outlook: remembered, and left out of everything
+        // (not offered, and no room on them counts).
         val absent = reads.filterValues { it is LabelRead.Absent }.keys
         absent.forEach { ScanLog.i("Not in Outlook, left out: ${it.title} ${it.date} ${it.start}") }
+        if (labelPlan.absent.isNotEmpty()) ScanLog.i("${labelPlan.absent.size} event(s) found missing from Outlook lately, left out")
+        val gone = labelPlan.absent + absent.map { it.occurrenceKey }
         // The cache proved unreliable: what it gave this run is left out too.
         val distrusted = labels.remember(read, Instant.now(), absent) && labelPlan.known.isNotEmpty()
         val reused = if (distrusted) emptyMap() else labelPlan.known
@@ -180,8 +187,8 @@ object BookingController {
         val keys = candidates.map { it.occurrenceKey }
         val out = BookingPlanner.plan(
             BookingPlanner.Input(
-                events = events,
-                labels = reused + read.mapKeys { it.key.labelKey } + absent.associate { it.labelKey to listOf(LabelCachePolicy.ABSENT) },
+                events = events.filterNot { it.occurrenceKey in gone },
+                labels = reused + read.mapKeys { it.key.labelKey },
                 attendees = attendees,
                 known = bookings.known(keys),
                 answers = bookings.answers(keys),
@@ -407,7 +414,16 @@ object BookingController {
         if (job?.isActive != true) _state.value = State.Idle
     }
 
-    /** Reads the rooms' replies again (the results and bookings screens do, while open). */
-    suspend fun refreshReplies(context: Context): Int =
-        runCatching { BookingStore.get(context).refreshReplies() }.getOrElse { ScanLog.e("Reading room replies failed", it); 0 }
+    /**
+     * Reads the rooms' replies again (the results and bookings screens do, while open). The screen
+     * leaving cancels the caller: that isn't a failure (the store finishes its write regardless).
+     */
+    suspend fun refreshReplies(context: Context): Int = try {
+        BookingStore.get(context).refreshReplies()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        ScanLog.e("Reading room replies failed", e)
+        0
+    }
 }

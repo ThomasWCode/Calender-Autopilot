@@ -18,15 +18,18 @@ object LabelCachePolicy {
     val MAX_AGE: Duration = Duration.ofDays(30)
 
     /**
-     * Stored in place of labels for an event the phone's calendar has but Outlook doesn't show
-     * ([com.thomaswcode.calendareventtimers.outlook.LabelRead.Absent]). It matches no label, so the
-     * event is simply not offered; it is trusted for [ABSENT_MAX_AGE] only, in case Outlook just
-     * hadn't shown it yet.
+     * Stored for one occurrence the phone's calendar has but Outlook doesn't show
+     * ([com.thomaswcode.calendareventtimers.outlook.LabelRead.Absent]), under [absentKey]: never for
+     * the whole series, whose other occurrences may be fine. Trusted for [ABSENT_MAX_AGE] only, in
+     * case Outlook just hadn't shown it yet.
      */
     const val ABSENT = "<not in Outlook>"
     val ABSENT_MAX_AGE: Duration = Duration.ofDays(7)
 
     fun isAbsent(categories: List<String>?): Boolean = categories == listOf(ABSENT)
+
+    /** The cache key of an occurrence found absent (label keys never start like this). */
+    fun absentKey(occurrenceKey: String): String = "absent:$occurrenceKey"
 
     fun reuse(cached: CachedLabels?, changeKey: String?, now: Instant): List<String>? {
         if (cached == null || changeKey == null || cached.changeKey != changeKey) return null
@@ -37,13 +40,14 @@ object LabelCachePolicy {
     }
 }
 
-/** One event to open in Outlook to read its labels: an occurrence of [labelKey]. */
+/** One event to open in Outlook to read its labels: an occurrence ([occurrenceKey]) of [labelKey]. */
 data class LabelTarget(
     val labelKey: String,
     val changeKey: String?,
     val date: LocalDate,
     val start: LocalTime,
     val title: String,
+    val occurrenceKey: String = labelKey,
 )
 
 object LabelTargets {
@@ -62,6 +66,19 @@ object LabelTargets {
             chosen += pick
         }
         return chosen.sortedWith(compareBy({ it.begin }, { it.title }))
-            .map { LabelTarget(it.labelKey, it.changeKey, it.date, it.start, it.title) }
+            .map { LabelTarget(it.labelKey, it.changeKey, it.date, it.start, it.title, it.occurrenceKey) }
+    }
+
+    /**
+     * After a round of reads: a series whose chosen occurrence turned out [absent] still needs its
+     * labels, so another of its occurrences among [events] is read instead, never one already
+     * [tried] or known to be absent ([knownAbsent], occurrence keys). Series read some other way
+     * (labels, or a problem reported) aren't tried again.
+     */
+    fun retry(events: List<CalEvent>, knownAbsent: Set<String>, tried: Collection<LabelTarget>, absent: Collection<LabelTarget>): List<LabelTarget> {
+        val triedKeys = tried.map { it.occurrenceKey }.toSet()
+        val settled = (tried - absent.toSet()).map { it.labelKey }.toSet()
+        val series = absent.map { it.labelKey }.toSet() - settled
+        return choose(events.filter { it.labelKey in series && it.occurrenceKey !in triedKeys && it.occurrenceKey !in knownAbsent })
     }
 }

@@ -281,6 +281,19 @@ object PeopleReader {
         return (fromDesc + fromText).distinct()
     }
 
+    /**
+     * Chips that are neither on the form [before] (counts by label) nor an address in [want]. New
+     * chips come after the old ones, so of chips sharing a label the first ones are taken as old.
+     */
+    fun strays(chips: List<Chip>, before: Map<String, Int>, want: Collection<String>): List<Chip> {
+        val seen = HashMap<String, Int>()
+        return chips.filter { c ->
+            val n = (seen[c.label] ?: 0) + 1
+            seen[c.label] = n
+            c.address !in want && n > (before[c.label] ?: 0)
+        }
+    }
+
     fun chipCount(root: UiNode): Int = root.findAll { it.viewId == CONTACT_CHIP_TEXT }.size
 
     fun doneButton(root: UiNode): UiNode? = root.byId(PEOPLE_ROOT)?.find { it.viewId == ACTION_DONE }

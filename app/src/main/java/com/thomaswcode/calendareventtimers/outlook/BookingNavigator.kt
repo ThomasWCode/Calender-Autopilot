@@ -593,8 +593,10 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
      */
     private suspend fun typePeople(emails: List<String>): List<String> {
         val want = emails.map { it.lowercase() }.distinct()
-        // Chips already there (Manage bookings): left alone.
-        val before = PeopleReader.chips(driver.freshSnapshot()).map { it.label }.toSet()
+        // Chips already there (Manage bookings) are left alone, counted by label: a new chip may look
+        // like an old one. New chips come after the old ones, so the first ones of a label are old.
+        val before = PeopleReader.chips(driver.freshSnapshot()).groupingBy { it.label }.eachCount()
+        fun strays(chips: List<PeopleReader.Chip>) = PeopleReader.strays(chips, before, want)
         for (email in want) {
             if (email in PeopleReader.chipAddresses(driver.freshSnapshot())) continue
             val input = PeopleReader.input(driver.freshSnapshot()) ?: fail("No address field in Add People")
@@ -607,13 +609,13 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         }
         var tries = 0
         while (tries++ < want.size + 2) {
-            val stray = PeopleReader.chips(driver.freshSnapshot()).firstOrNull { it.label !in before && it.address !in want } ?: break
+            val stray = strays(PeopleReader.chips(driver.freshSnapshot())).lastOrNull() ?: break
             ScanLog.w("Taking off a chip that isn't an address asked for: '${stray.label}'")
             takeOff(stray)
         }
         clearAddressField()
         val after = driver.freshSnapshot()
-        if (PeopleReader.chips(after).any { it.label !in before && it.address !in want }) {
+        if (strays(PeopleReader.chips(after)).isNotEmpty()) {
             fail("Outlook added someone the app didn't ask for, and it couldn't be taken off; nothing was saved")
         }
         val on = PeopleReader.chipAddresses(after)
@@ -630,14 +632,16 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
      * cleared (both seen on 2026-10-07).
      */
     private suspend fun takeOff(chip: PeopleReader.Chip) {
+        fun alike(r: UiNode) = PeopleReader.chips(r).count { it.label == chip.label }
+        val was = alike(driver.freshSnapshot())
         clearAddressField()
         driver.click(chip.node, "chip ${chip.label}")
         driver.waitUntil(2_000) {
             val r = driver.freshSnapshot()
-            PeopleReader.inputText(r).isNotEmpty() || PeopleReader.chips(r).none { it.label == chip.label }
+            PeopleReader.inputText(r).isNotEmpty() || alike(r) < was
         }
         clearAddressField()
-        driver.waitUntil(2_000) { PeopleReader.chips(driver.freshSnapshot()).none { it.label == chip.label } }
+        driver.waitUntil(2_000) { alike(driver.freshSnapshot()) < was }
     }
 
     /** Text left in the address field would become a chip on Done. */
