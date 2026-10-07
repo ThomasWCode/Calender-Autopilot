@@ -7,6 +7,7 @@ import android.content.Intent
 import com.thomaswcode.calendareventtimers.booking.DescriptionText
 import com.thomaswcode.calendareventtimers.calendar.CalendarStore
 import com.thomaswcode.calendareventtimers.calendar.TimeZones
+import com.thomaswcode.calendareventtimers.util.Prefs
 import com.thomaswcode.calendareventtimers.util.ScanLog
 import java.time.LocalDate
 import java.time.LocalTime
@@ -92,6 +93,15 @@ object DebugProbes {
                     .onFailure { ScanLog.w("Probe people_flow failed: ${it.message}") }
                 val after = driver.freshSnapshot()
                 ScanLog.i("Probe people_flow: chips ${PeopleReader.chips(after).map { "${it.label}=${it.address}" }}, field '${PeopleReader.inputText(after)}'")
+            }
+            "rooms" -> {
+                // The room settings for a check (C5, C7); --es list "" puts back the default list.
+                Prefs.ensureLoaded(service)
+                intent.getStringExtra("list")?.let { list ->
+                    Prefs.setRooms(service, list.split(',').map { it.trim() }.filter { it.isNotEmpty() })
+                }
+                intent.getStringExtra("recent")?.let { Prefs.setRecentShortcut(service, it == "on") }
+                ScanLog.i("Probe rooms: ${Prefs.rooms.value}, Recent shortcut ${Prefs.recentShortcut.value}")
             }
             "create_event", "edit_event", "delete_event" -> {
                 // Test events (PHONE-CHECKS.md D): saved in Outlook, so delete each one afterwards.
