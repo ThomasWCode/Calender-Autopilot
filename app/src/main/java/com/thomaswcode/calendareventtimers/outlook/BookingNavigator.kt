@@ -3,6 +3,7 @@ package com.thomaswcode.calendareventtimers.outlook
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.view.KeyEvent
 import com.thomaswcode.calendareventtimers.booking.DescriptionText
 import com.thomaswcode.calendareventtimers.booking.FormText
 import com.thomaswcode.calendareventtimers.booking.People
@@ -87,11 +88,19 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
     var stopRun: String? = null
         private set
 
+    /**
+     * Addresses asked for in the last booking or people change that no chip confirmed: taken off the
+     * form again, so they weren't told (QUESTIONS.md Q18). The caller records everyone else.
+     */
+    var notAdded: List<String> = emptyList()
+        private set
+
     private val notes = mutableListOf<String>()
     private var missingRooms: List<String> = emptyList()
 
     suspend fun createBooking(job: BookingJob, settings: RoomSettings, dryRun: Boolean): BookingOutcome {
         notes.clear()
+        notAdded = emptyList()
         nav.ensureOnDay(job.date)
         return withFormGuard(job.title) {
             openNewEventForm()
@@ -104,10 +113,11 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
                 return@withFormGuard BookingOutcome.NoRoom(missingRooms)
             }
             setTitle(job.title)
-            if (people.isNotEmpty()) addPeople(people)
+            val told = if (people.isNotEmpty()) addPeople(people) else emptyList()
             if (!DescriptionText.isEmpty(job.description)) setDescription(job.description!!)
             setAlertNone()
-            verifyForm(job.title, job.date, job.start, job.end, room, people.size)
+            setOnlineMeetingOff()
+            verifyForm(job.title, job.date, job.start, job.end, room, told.size)
             if (dryRun) {
                 ScanLog.i("Dry run: '${job.title}' filled in with $room; discarding it")
                 discard()
@@ -146,18 +156,20 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         date: LocalDate, start: LocalTime, end: LocalTime?, title: String, room: String?, add: List<String>, remove: List<String>,
     ): BookingOutcome {
         notes.clear()
+        notAdded = emptyList()
         return withFormGuard(title) {
             openForEdit(date, start, end, title, room)
             openPeople()
             for (email in remove) removePerson(email)
             if (add.isNotEmpty()) typePeople(add)
-            val on = PeopleReader.chipAddresses(driver.snapshot())
-            (remove.filter { it.lowercase() in on } + add.filter { it.lowercase() !in on }).takeIf { it.isNotEmpty() }?.let {
-                fail("The people on the booking didn't come out as asked (${it.joinToString()}); nothing was saved")
+            val on = PeopleReader.chipAddresses(driver.freshSnapshot())
+            remove.filter { it.lowercase() in on }.takeIf { it.isNotEmpty() }?.let {
+                fail("${it.joinToString()} couldn't be taken off the booking; nothing was saved")
             }
+            if (remove.isEmpty() && notAdded.size == add.distinct().size) fail("None of ${add.joinToString()} could be confirmed in Outlook; nothing was saved")
             closePeople()
             save(null)
-            BookingOutcome.Changed("people updated")
+            BookingOutcome.Changed("people updated" + notes.joinToString("") { "; $it" })
         }
     }
 
@@ -383,7 +395,7 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         var wrapping = wraps
         var stuck = 0
         repeat(MAX_WHEEL_STEPS) {
-            val wheel = TimePickerReader.wheels(driver.snapshot()).getOrNull(index) ?: fail("Couldn't find the $what wheel")
+            val wheel = TimePickerReader.wheels(driver.freshSnapshot()).getOrNull(index) ?: fail("Couldn't find the $what wheel")
             val value = wheel.value
             val current = read(value) ?: fail("Couldn't read the $what wheel ('$value')")
             if (current == target) return
@@ -392,7 +404,7 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
             val moved = driver.scroll(wheel.picker, forward) ||
                 ((if (forward) wheel.next else wheel.previous)?.let { driver.click(it, "$what ${if (forward) "next" else "previous"}") } ?: false)
             if (!moved) fail("The $what wheel can't be moved")
-            val changed = driver.waitUntil(1_500) { TimePickerReader.wheels(driver.snapshot()).getOrNull(index)?.value != value }
+            val changed = driver.waitUntil(1_500) { TimePickerReader.wheels(driver.freshSnapshot()).getOrNull(index)?.value != value }
             if (!changed) {
                 if (wrapping) {
                     ScanLog.w("The $what wheel doesn't wrap; going the long way")
@@ -555,11 +567,13 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         }
     }
 
-    private suspend fun addPeople(emails: List<String>) {
+    /** Adds the people to tell; returns those on the form (the rest are in [notAdded], with a note). */
+    private suspend fun addPeople(emails: List<String>): List<String> {
         nav.onProgress("Adding ${emails.size} ${if (emails.size == 1) "person" else "people"} to notify…")
         openPeople()
-        typePeople(emails)
+        val told = typePeople(emails)
         closePeople()
+        return told
     }
 
     private suspend fun openPeople() {
@@ -570,45 +584,89 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
     }
 
     /**
-     * Types the addresses, each followed by a comma, which turns it into a chip (§2.6). Each address
-     * must then show on a chip: nobody is invited unless the form shows exactly who (a chip that
-     * doesn't show its address could be someone else).
+     * Types each address, then a comma, through the service's input method as a keyboard does: the
+     * comma turns it into a chip (§2.6; ACTION_SET_TEXT and the Enter key don't, seen on 2026-10-07).
+     * Only an address that a chip then shows counts: whatever else this added (a chip naming someone
+     * else, one without an address, text left in the field) is taken off again, and those people are
+     * left out with a note (QUESTIONS.md Q18) rather than failing the booking. Returns the addresses
+     * now on the form.
      */
-    private suspend fun typePeople(emails: List<String>) {
-        val want = emails.map { it.lowercase() }
-        val input = PeopleReader.input(driver.snapshot()) ?: fail("No address field in Add People")
-        driver.setText(input, emails.joinToString(", ", postfix = ","))
-        if (!driver.waitUntil(3_000) { PeopleReader.chipAddresses(driver.snapshot()).containsAll(want) }) {
-            // One at a time instead.
-            for (email in want.filter { it !in PeopleReader.chipAddresses(driver.snapshot()) }) {
-                val field = PeopleReader.input(driver.snapshot()) ?: fail("No address field in Add People")
-                driver.setText(field, "$email,")
-                driver.waitUntil(3_000) { email in PeopleReader.chipAddresses(driver.snapshot()) }
-            }
+    private suspend fun typePeople(emails: List<String>): List<String> {
+        val want = emails.map { it.lowercase() }.distinct()
+        // Chips already there (Manage bookings): left alone.
+        val before = PeopleReader.chips(driver.freshSnapshot()).map { it.label }.toSet()
+        for (email in want) {
+            if (email in PeopleReader.chipAddresses(driver.freshSnapshot())) continue
+            val input = PeopleReader.input(driver.freshSnapshot()) ?: fail("No address field in Add People")
+            driver.click(input, "address field")
+            driver.focus(input)
+            clearAddressField()
+            delay(300)
+            if (!driver.type(email) || !driver.key(KeyEvent.KEYCODE_COMMA)) fail("Couldn't type into Add People")
+            driver.waitUntil(3_000) { email in PeopleReader.chipAddresses(driver.freshSnapshot()) }
         }
-        val missing = want - PeopleReader.chipAddresses(driver.snapshot()).toSet()
-        if (missing.isNotEmpty()) fail("Couldn't confirm ${missing.joinToString()} on the booking: no chip shows the address")
+        var tries = 0
+        while (tries++ < want.size + 2) {
+            val stray = PeopleReader.chips(driver.freshSnapshot()).firstOrNull { it.label !in before && it.address !in want } ?: break
+            ScanLog.w("Taking off a chip that isn't an address asked for: '${stray.label}'")
+            takeOff(stray)
+        }
+        clearAddressField()
+        val after = driver.freshSnapshot()
+        if (PeopleReader.chips(after).any { it.label !in before && it.address !in want }) {
+            fail("Outlook added someone the app didn't ask for, and it couldn't be taken off; nothing was saved")
+        }
+        val on = PeopleReader.chipAddresses(after)
+        notAdded = want.filter { it !in on }
+        if (notAdded.isNotEmpty()) {
+            ScanLog.w("Not added (no chip shows the address): ${notAdded.joinToString()}")
+            notes += "not told, as Outlook didn't confirm the address: ${notAdded.joinToString()}"
+        }
+        return want.filter { it in on }
     }
 
-    /** The chip of [email]: its description `…<email>`, or its text being the address (as [PeopleReader.chipAddresses] reads them). */
-    private fun chipOf(root: UiNode, email: String): UiNode? =
-        root.find { it.desc?.contains("<$email>", ignoreCase = true) == true }
-            ?: root.find { it.viewId == OutlookSelectors.CONTACT_CHIP_TEXT && cleanUiText(it.text).equals(email, ignoreCase = true) }
+    /**
+     * Tapping a chip takes it off, or turns it back into text in the address field, which is then
+     * cleared (both seen on 2026-10-07).
+     */
+    private suspend fun takeOff(chip: PeopleReader.Chip) {
+        clearAddressField()
+        driver.click(chip.node, "chip ${chip.label}")
+        driver.waitUntil(2_000) {
+            val r = driver.freshSnapshot()
+            PeopleReader.inputText(r).isNotEmpty() || PeopleReader.chips(r).none { it.label == chip.label }
+        }
+        clearAddressField()
+        driver.waitUntil(2_000) { PeopleReader.chips(driver.freshSnapshot()).none { it.label == chip.label } }
+    }
+
+    /** Text left in the address field would become a chip on Done. */
+    private suspend fun clearAddressField() {
+        if (PeopleReader.inputText(driver.freshSnapshot()).isEmpty()) return
+        val input = PeopleReader.input(driver.freshSnapshot()) ?: return
+        driver.setText(input, "")
+        if (!driver.waitUntil(1_500) { PeopleReader.inputText(driver.freshSnapshot()).isEmpty() }) fail("Couldn't clear Add People's address field")
+    }
 
     private suspend fun removePerson(email: String) {
-        val r = driver.snapshot()
-        val chip = chipOf(r, email)
+        val r = driver.freshSnapshot()
+        val chip = PeopleReader.chips(r).firstOrNull { it.address == email.lowercase() }
         if (chip == null) {
             // Not on it as far as the chips say, unless a chip doesn't show whose it is.
-            if (PeopleReader.chipCount(r) > PeopleReader.chipAddresses(r).size) fail("Couldn't tell whether $email is on the booking: a chip doesn't show its address")
+            if (PeopleReader.chips(r).any { it.address == null }) fail("Couldn't tell whether $email is on the booking: a chip doesn't show its address")
             ScanLog.i("$email isn't on the booking")
             return
         }
-        driver.click(chip, "chip $email")
-        val remove = driver.waitFor(2_000) { r -> r.find { n -> (n.desc ?: n.text)?.let { REMOVE.containsMatchIn(it) } == true && (n.clickable || n.isButton) } }
-            ?: fail("Removing someone from a booking isn't automated yet (no Remove after tapping $email's chip)")
-        driver.click(remove, "Remove $email")
-        if (!driver.waitUntil(2_000) { email !in PeopleReader.chipAddresses(driver.snapshot()) }) fail("$email is still on the booking")
+        takeOff(chip)
+        if (email.lowercase() in PeopleReader.chipAddresses(driver.freshSnapshot())) fail("$email is still on the booking")
+    }
+
+    /** Debug builds ([DebugProbes]): the people steps on an open Add People screen. Nothing is saved. */
+    internal suspend fun probePeople(add: List<String>, remove: List<String>): List<String> {
+        notes.clear()
+        notAdded = emptyList()
+        for (email in remove) removePerson(email)
+        return typePeople(add).also { ScanLog.i("Probe people: on $it, not added $notAdded, notes $notes") }
     }
 
     private suspend fun closePeople() {
@@ -617,13 +675,18 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         waitForForm("Add People didn't close")
     }
 
+    /**
+     * Copies the original's description into the editor (a WebView). Pasted through the service's
+     * input method, which keeps an HTML description's formatting and links (ACTION_PASTE is refused
+     * there, seen on 2026-10-07); else typed as plain text. Checked by reading the editor back.
+     */
     private suspend fun setDescription(raw: String) {
         nav.onProgress("Copying the description…")
         val row = EventFormReader.descriptionRow(driver.snapshot()) ?: fail("Couldn't find the form's Description row")
         driver.click(row.node, "Description row")
         driver.waitFor(4_000) { if (DescriptionReader.isOpen(it)) true else null } ?: fail("The description editor didn't open")
         delay(700) // the WebView's editor loads
-        val editor = DescriptionReader.editor(driver.snapshot()) ?: fail("No description editor")
+        val editor = DescriptionReader.editor(driver.freshSnapshot()) ?: fail("No description editor")
         driver.click(editor, "description editor")
         driver.focus(editor)
         delay(300)
@@ -631,18 +694,20 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         val html = if (DescriptionText.isHtml(raw)) DescriptionText.cleanHtml(raw) else null
         var ok = false
         try {
-            if (html != null && setClipboard(plain, html)) {
-                ok = driver.paste(DescriptionReader.editor(driver.snapshot()) ?: editor)
-                delay(800)
+            if (setClipboard(plain, html)) {
+                driver.imePaste()
+                ok = driver.waitUntil(2_500) { copied(plain) }
+                if (!ok) ok = driver.paste(DescriptionReader.editor(driver.freshSnapshot()) ?: editor) && driver.waitUntil(1_500) { copied(plain) }
             }
-            if (!ok) ok = driver.setText(DescriptionReader.editor(driver.snapshot()) ?: editor, plain)
-            if (!ok && setClipboard(plain, null)) ok = driver.paste(DescriptionReader.editor(driver.snapshot()) ?: editor)
+            if (!ok && DescriptionReader.text(driver.freshSnapshot()).isNullOrBlank()) {
+                ScanLog.w("Pasting the description didn't work; typing it as plain text")
+                ok = driver.type(plain) && driver.waitUntil(2_500) { copied(plain) }
+            }
         } finally {
             // Also after STOP or a failure: the meeting's description never stays on the clipboard.
             clearClipboard()
         }
-        if (!ok) fail("Couldn't put the description in")
-        DescriptionReader.text(driver.snapshot())?.let { ScanLog.i("Description editor now starts '${it.take(40)}'") }
+        if (!ok) fail("Couldn't put the description in (the editor reads '${DescriptionReader.text(driver.freshSnapshot())?.take(40)}')")
         val done = DescriptionReader.doneButton(driver.snapshot()) ?: fail("No Done on the description editor")
         driver.click(done, "description Done")
         waitForForm("The description editor didn't close")
@@ -651,6 +716,15 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
             notes += "the description may not have been copied"
             ScanLog.w("The form still says 'Description' after copying it")
         }
+    }
+
+    /**
+     * The editor reads back the description's start. Spaces are left out of the comparison: the
+     * editor's text has no line breaks, and table cells come out of [DescriptionText.plain] unspaced.
+     */
+    private fun copied(plain: String): Boolean {
+        val start = plain.replace(SPACES, "").take(20)
+        return DescriptionReader.text(driver.freshSnapshot())?.replace(SPACES, "")?.contains(start) == true
     }
 
     private fun setClipboard(plain: String, html: String?): Boolean = runCatching {
@@ -679,13 +753,24 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         if (!value.equals(OutlookSelectors.TEXT_ALERT_NONE, ignoreCase = true)) fail("The alert reads '$value', not None")
     }
 
+    /** A booking is never a Zoom meeting: the Online Meeting switch (off by default) is turned off if on. */
+    private suspend fun setOnlineMeetingOff() {
+        val switch = EventFormReader.onlineMeetingSwitch(driver.freshSnapshot()) ?: return
+        if (!switch.checked) return
+        ScanLog.w("Online Meeting was on; turning it off")
+        driver.click(switch, "Online Meeting switch")
+        if (!driver.waitUntil(2_000) { EventFormReader.onlineMeetingSwitch(driver.freshSnapshot())?.checked == false }) {
+            fail("Couldn't turn off Online Meeting")
+        }
+    }
+
     /**
      * Reads the whole form back before saving (PLAN-ROOM-BOOKING.md §3.9 step 8). The people were
      * checked on Add People's chips; how the form's People row shows them isn't known yet
      * (PHONE-CHECKS.md E), so a row still reading "People" is only noted.
      */
     private fun verifyForm(title: String, date: LocalDate, start: LocalTime, end: LocalTime, room: String, people: Int) {
-        val f = driver.snapshot()
+        val f = driver.freshSnapshot()
         if (people > 0 && EventFormReader.peopleRow(f)?.label.equals(OutlookSelectors.TEXT_PEOPLE, ignoreCase = true)) {
             notes += "the form's People row didn't show the people added"
             ScanLog.w("People row still reads 'People' after adding $people")
@@ -696,6 +781,7 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
             "time ${formTimes(f)}".takeIf { formTimes(f) != (start to end) },
             "location '${EventFormReader.location(f)}'".takeIf { !RoomChoice.namesRoom(EventFormReader.location(f), room) },
             "alert '${EventFormReader.alertRow(f)?.value}'".takeIf { !EventFormReader.alertRow(f)?.value.equals(OutlookSelectors.TEXT_ALERT_NONE, ignoreCase = true) },
+            "Online Meeting (on)".takeIf { EventFormReader.onlineMeetingSwitch(f)?.checked == true },
         )
         if (wrong.isNotEmpty()) fail("Before saving, the form had the wrong ${wrong.joinToString()}")
     }
@@ -784,6 +870,6 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         const val MAX_ROOM_PAGES = 8
         const val MAX_DISCARD_STEPS = 10
         val DELETE_CONFIRMATIONS = setOf("delete", "yes", "ok", "send", "cancel event", "cancel meeting", "delete event")
-        val REMOVE = Regex("""\b(remove|delete)\b""", RegexOption.IGNORE_CASE)
+        val SPACES = Regex("""\s+""")
     }
 }

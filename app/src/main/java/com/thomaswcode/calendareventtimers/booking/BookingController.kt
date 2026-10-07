@@ -293,8 +293,11 @@ object BookingController {
                                     val title = BookingRules.bookingTitle(e.title)
                                     val description = withContext(Dispatchers.IO) { calendarStore.descriptions(listOf(e.eventId))[e.eventId] }
                                     val outcome = booker.createBooking(BookingJob(e.date, e.start, e.endTime, title, go.people, description), settings, dryRun)
-                                    // The form leaves out the user's own address (BookingNavigator.createBooking).
-                                    val told = go.people.filterNot { p -> booker.accountAddress?.let { p.equals(it, ignoreCase = true) } == true }
+                                    // The form leaves out the user's own address (BookingNavigator.createBooking),
+                                    // and anyone Outlook didn't confirm (taken off again, with a note).
+                                    val told = go.people.filterNot { p ->
+                                        booker.accountAddress?.let { p.equals(it, ignoreCase = true) } == true || p.lowercase() in booker.notAdded
+                                    }
                                     rows[c.key] = withContext(NonCancellable) { record(store, current, a, outcome, told, go.notes, dryRun) }
                                     // Recorded (a booking that may have been saved isn't lost); now stop if Outlook is lost.
                                     booker.stopRun?.let { throw ScanFailure(it) }
