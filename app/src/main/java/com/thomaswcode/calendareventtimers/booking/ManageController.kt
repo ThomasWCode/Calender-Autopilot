@@ -100,7 +100,7 @@ object ManageController {
         val last = (bookings.map { LocalDate.parse(it.eventDate) } + today.plusWeeks(CALENDAR_WEEKS)).max()
         val events = main?.let { calendar.occurrencesOn(it, today, last, zone) }.orEmpty()
         val bookingEvents = BookingStore.ownBookingEvents(events, mine)
-        val attendees = calendar.attendees((events.map { it.eventId } + bookings.map { it.originalEventId }).distinct())
+        val attendees = RoomCover.withoutStaleRooms(events, calendar.attendees((events.map { it.eventId } + bookings.map { it.originalEventId }).distinct()), rooms)
         val now = Instant.now()
         val settled = bookings.filter { BookingStore.synced(it, now) }.map { it.id }.toSet()
         val pairs = BookingStore.pair(bookings, bookingEvents, settled, { e -> BookingStore.declined(attendees[e.eventId].orEmpty(), rooms) }) { e ->

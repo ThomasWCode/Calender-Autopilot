@@ -144,7 +144,7 @@ class BookingStore private constructor(private val context: Context) {
         Prefs.ensureLoaded(context)
         val rooms = Prefs.rooms.value
         val events = ownBookingEvents(calendar.occurrencesOn(main, dates.min(), dates.max(), zone), BookingController.myAddresses(main))
-        val attendees = calendar.attendees(events.map { it.eventId })
+        val attendees = RoomCover.withoutStaleRooms(events, calendar.attendees(events.map { it.eventId }), rooms)
         val settled = bookings.filter { synced(it, now) }.map { it.id }.toSet()
         val paired = pair(bookings, events, settled, { e -> declined(attendees[e.eventId].orEmpty(), rooms) }) { e ->
             RoomCover.roomReply(attendees[e.eventId].orEmpty(), rooms)?.first

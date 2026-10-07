@@ -147,19 +147,22 @@ private fun nextAlarm(upcoming: List<AlarmEntity>): String {
     return "Next alarm: ${nextAlarmFormat.format(at)} ${AlarmText.ellipsize(next.title, 40)}"
 }
 
-/** "This week: 4 booked · Next week: not booked yet", from the app's saved bookings. */
-private fun bookingSummary(bookings: List<BookingEntity>, monday: LocalDate): String {
+/**
+ * "This week: 4 booked · Next week: not booked yet", from the app's saved bookings, led by what
+ * needs looking at ("1 declined · …"): the card shows two lines at most, and those come first.
+ */
+internal fun bookingSummary(bookings: List<BookingEntity>, monday: LocalDate): String {
     fun inWeek(b: BookingEntity, start: LocalDate) = LocalDate.parse(b.eventDate).let { !it.isBefore(start) && it.isBefore(start.plusDays(7)) }
     val thisWeek = bookings.filter { inWeek(it, monday) }
     val nextWeek = bookings.filter { inWeek(it, monday.plusWeeks(1)) }
     val parts = mutableListOf<String>()
     // Booked: holding a room; the others are counted as what needs looking at.
     fun booked(list: List<BookingEntity>) = list.count { RoomCover.holds(it.roomReply) }
-    if (thisWeek.isNotEmpty()) parts += "This week: ${booked(thisWeek)} booked"
-    parts += if (nextWeek.isEmpty()) "Next week: not booked yet" else "Next week: ${booked(nextWeek)} booked"
     val both = thisWeek + nextWeek
     both.count { it.roomReply == RoomReply.DECLINED }.takeIf { it > 0 }?.let { parts += "$it declined" }
     both.count { it.roomReply == RoomReply.NO_ROOM }.takeIf { it > 0 }?.let { parts += "$it without a room" }
     both.count { it.roomReply == RoomReply.NOT_FOUND }.takeIf { it > 0 }?.let { parts += "$it missing" }
+    if (thisWeek.isNotEmpty()) parts += "This week: ${booked(thisWeek)} booked"
+    parts += if (nextWeek.isEmpty()) "Next week: not booked yet" else "Next week: ${booked(nextWeek)} booked"
     return parts.joinToString(" · ")
 }
