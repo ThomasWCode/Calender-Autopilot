@@ -84,7 +84,13 @@ object ManageController {
         val app = context.applicationContext
         Prefs.ensureLoaded(app)
         val store = BookingStore.get(app)
-        runCatching { store.refreshReplies(Instant.now(), zone) }
+        try {
+            store.refreshReplies(Instant.now(), zone)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ScanLog.e("Reading room replies failed", e)
+        }
         val today = LocalDate.now(zone)
         val bookings = store.savedFrom(today)
         val calendar = CalendarStore(app)
@@ -308,7 +314,9 @@ object ManageController {
                     }
                     val booker = BookingNavigator(navigator, service)
                     val outcome = action(booker, settings)
-                    recorded = withContext(NonCancellable) { apply(app, booking, outcome, peopleAfter) } + booker.stopRun?.let { " $it" }.orEmpty()
+                    // Anyone Outlook didn't confirm was taken off again, so isn't recorded as told.
+                    val people = peopleAfter?.filterNot { it.lowercase() in booker.notAdded }
+                    recorded = withContext(NonCancellable) { apply(app, booking, outcome, people) } + booker.stopRun?.let { " $it" }.orEmpty()
                 }
                 recorded ?: "Nothing was done."
             } catch (e: CancellationException) {
