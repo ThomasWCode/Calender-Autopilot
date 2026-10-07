@@ -571,7 +571,7 @@ fun BookingResultsScreen(results: BookingResults, onDone: () -> Unit) {
             TopAppBar(title = {
                 Column {
                     Text(if (results.dryRun) "Dry run finished" else "Rooms for ${BookingRanges.title(results.range).lowercase()}")
-                    Text(summaryLine(results), style = MaterialTheme.typography.bodyMedium)
+                    Text(ReplyText.resultsSummary(results.rows.map { it.outcome }, replies, results.dryRun), style = MaterialTheme.typography.bodyMedium)
                 }
             })
         },
@@ -602,16 +602,6 @@ fun BookingResultsScreen(results: BookingResults, onDone: () -> Unit) {
             }
         }
     }
-}
-
-private fun summaryLine(r: BookingResults): String {
-    val booked = r.rows.count { it.outcome is RowOutcome.Booked }
-    val parts = mutableListOf(if (r.dryRun) "$booked would be booked" else "$booked booked")
-    r.rows.count { it.outcome is RowOutcome.NoRoom }.takeIf { it > 0 }?.let { parts += "$it with no free room" }
-    r.rows.count { it.outcome is RowOutcome.Failed }.takeIf { it > 0 }?.let { parts += "$it failed" }
-    r.rows.count { it.outcome is RowOutcome.Uncertain }.takeIf { it > 0 }?.let { parts += "$it to check in Outlook" }
-    r.rows.count { it.outcome is RowOutcome.NotDone }.takeIf { it > 0 }?.let { parts += "$it not done" }
-    return parts.joinToString(" · ")
 }
 
 @Composable

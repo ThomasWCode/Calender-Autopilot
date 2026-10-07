@@ -1,9 +1,11 @@
 package com.thomaswcode.calendareventtimers
 
 import com.thomaswcode.calendareventtimers.booking.FormText
+import com.thomaswcode.calendareventtimers.booking.RowOutcome
 import com.thomaswcode.calendareventtimers.calendar.CalEvent
 import com.thomaswcode.calendareventtimers.calendar.CalendarRows
 import com.thomaswcode.calendareventtimers.calendar.TimeZones
+import com.thomaswcode.calendareventtimers.data.RoomReply
 import com.thomaswcode.calendareventtimers.engine.CachedLabels
 import com.thomaswcode.calendareventtimers.engine.LabelCachePolicy
 import com.thomaswcode.calendareventtimers.engine.LabelTargets
@@ -15,6 +17,7 @@ import com.thomaswcode.calendareventtimers.outlook.PeopleReader
 import com.thomaswcode.calendareventtimers.outlook.UiNode
 import com.thomaswcode.calendareventtimers.ui.AppNav
 import com.thomaswcode.calendareventtimers.ui.Page
+import com.thomaswcode.calendareventtimers.ui.ReplyText
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -246,5 +249,21 @@ class PhoneChecksReviewTest {
             if (it < 2) absent += next
         }
         assertTrue(LabelTargets.retry(events, emptySet(), tried, absent).isEmpty())
+    }
+}
+
+class ResultsSummaryTest {
+    @Test
+    fun aDeclinedBookingIsNotCountedAsBooked() {
+        // Seen on 2026-10-08: a 06:00 booking declined by its room was shown as "1 booked".
+        val declined = RowOutcome.Booked("KS-103D", saved = true, notes = emptyList(), bookingId = 1)
+        val waiting = RowOutcome.Booked("KS-117", saved = true, notes = emptyList(), bookingId = 2)
+        val reserved = RowOutcome.Booked("KS-121", saved = true, notes = emptyList(), bookingId = 3)
+        val replies = mapOf(1L to RoomReply.DECLINED, 2L to RoomReply.WAITING, 3L to RoomReply.RESERVED)
+        assertEquals("2 booked · 1 declined", ReplyText.resultsSummary(listOf(declined, waiting, reserved), replies, dryRun = false))
+        // Before any reply is read, a saved booking counts.
+        assertEquals("1 booked", ReplyText.resultsSummary(listOf(declined), emptyMap(), dryRun = false))
+        val dry = RowOutcome.Booked("KS-103D", saved = false, notes = emptyList(), bookingId = null)
+        assertEquals("1 would be booked · 1 not done", ReplyText.resultsSummary(listOf(dry, RowOutcome.NotDone("Stopped.")), emptyMap(), dryRun = true))
     }
 }
