@@ -45,7 +45,10 @@ class CalendarStore(context: Context) {
         }.build()
         val instances = query(
             uri,
-            arrayOf("event_id", "begin", "end", "title", "eventLocation", "allDay", "organizer", "selfAttendeeStatus", "rrule", "eventStatus"),
+            arrayOf(
+                "event_id", "begin", "end", "title", "eventLocation", "allDay", "organizer", "selfAttendeeStatus", "rrule", "eventStatus",
+                "eventTimezone", "dtstart",
+            ),
             "calendar_id = ?", arrayOf(calendar.id.toString()),
         )
         val ids = instances.mapNotNull { it["event_id"]?.toLongOrNull() }.distinct()
@@ -55,6 +58,12 @@ class CalendarStore(context: Context) {
         ).associateBy { it["_id"]!!.toLong() }
         return CalendarRows.events(instances, events, zone)
     }
+
+    /** Debug probe: the main calendar's time zones, with how many events and repeating events use each. */
+    fun timeZones(calendar: ProviderCalendar): Map<String, Pair<Int, Int>> =
+        query(CalendarContract.Events.CONTENT_URI, arrayOf("eventTimezone", "rrule"), "calendar_id = ? AND deleted = 0", arrayOf(calendar.id.toString()))
+            .groupBy { it["eventTimezone"].orEmpty() }
+            .mapValues { (_, rows) -> rows.size to rows.count { !it["rrule"].isNullOrBlank() } }
 
     /** The occurrences of whole days [first]..[last] (device time zone). */
     fun occurrencesOn(calendar: ProviderCalendar, first: LocalDate, last: LocalDate, zone: ZoneId): List<CalEvent> =

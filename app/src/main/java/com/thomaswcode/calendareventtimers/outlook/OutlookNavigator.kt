@@ -28,6 +28,13 @@ sealed interface LabelRead {
     data class Read(val title: String, val categories: List<String>) : LabelRead
 
     data class Problem(val message: String) : LabelRead
+
+    /**
+     * The Day view, loaded, shows no event of that title at that time: the phone's calendar has an
+     * event Outlook doesn't (seen on 2026-10-07: a series moved to another day left behind in the
+     * provider). Remembered for a while, so it isn't looked for again on every run.
+     */
+    data class Absent(val message: String) : LabelRead
 }
 
 /**
@@ -336,6 +343,7 @@ class OutlookNavigator(
         val time = TriggerTime.formatHhMm(t.start)
         ensureOnDay(t.date)
         val count = min(findBlocks(t.date, t.start, t.title).size, MAX_SLOT_BLOCKS)
+        if (count == 0) return LabelRead.Absent("${t.title} ($time): in the phone's calendar but not in Outlook")
         val exact = ArrayList<LabelRead.Read>()
         val unreadable = ArrayList<String>()
         var other: String? = null

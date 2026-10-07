@@ -35,18 +35,22 @@ class LabelPass(context: Context) {
     }
 
     /**
-     * Stores labels read in Outlook. An entry that had expired but kept the same change key is
-     * compared first: if the labels differ, the change key can't be trusted to notice label
-     * changes, so the whole cache is dropped (and the log says so). Returns true then: the labels
-     * this run took from the cache ([Plan.known]) can't be trusted either.
+     * Stores labels read in Outlook, and [absent] events (not in Outlook: [LabelCachePolicy.ABSENT]).
+     * An entry that had expired but kept the same change key is compared first: if the labels
+     * differ, the change key can't be trusted to notice label changes, so the whole cache is dropped
+     * (and the log says so). Returns true then: the labels this run took from the cache
+     * ([Plan.known]) can't be trusted either. An event once absent and now found says nothing about
+     * the change key.
      */
-    suspend fun remember(reads: Map<LabelTarget, List<String>>, now: Instant): Boolean {
-        val keyed = reads.filterKeys { it.changeKey != null }
+    suspend fun remember(reads: Map<LabelTarget, List<String>>, now: Instant, absent: Collection<LabelTarget> = emptyList()): Boolean {
+        val keyed = (reads + absent.associateWith { listOf(LabelCachePolicy.ABSENT) }).filterKeys { it.changeKey != null }
         if (keyed.isEmpty()) return false
         val before = dao.get(keyed.keys.map { it.labelKey }).associateBy { it.labelKey }
         val stale = keyed.filter { (t, cats) ->
             val old = before[t.labelKey]
-            old != null && old.changeKey == t.changeKey && ListCodec.decode(old.categories).toSet() != cats.toSet()
+            val oldCats = old?.let { ListCodec.decode(it.categories) }
+            old != null && old.changeKey == t.changeKey && !LabelCachePolicy.isAbsent(oldCats) && !LabelCachePolicy.isAbsent(cats) &&
+                oldCats.orEmpty().toSet() != cats.toSet()
         }
         if (stale.isNotEmpty()) {
             ScanLog.w("Labels changed without a new change key (${stale.keys.joinToString { it.title }}); forgetting all remembered labels")

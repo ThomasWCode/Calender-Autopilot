@@ -52,15 +52,29 @@ object CalendarRows {
 
     /**
      * Occurrences from the `instances` table, completed with sync columns from the `events` table
-     * ([eventRows] by `_id`). Occurrences whose event row is missing or deleted are dropped.
+     * ([eventRows] by `_id`). Occurrences whose event row is missing or deleted are dropped. A
+     * repeating event in a time zone Android doesn't know ([knownToAndroid]) is corrected
+     * ([TimeZones.correct]): the provider repeats it in GMT.
      */
-    fun events(instanceRows: List<Row>, eventRows: Map<Long, Row>, zone: ZoneId): List<CalEvent> =
+    fun events(
+        instanceRows: List<Row>, eventRows: Map<Long, Row>, zone: ZoneId, knownToAndroid: (String) -> Boolean = TimeZones::known,
+    ): List<CalEvent> =
         instanceRows.mapNotNull { r ->
             val id = r.long("event_id") ?: return@mapNotNull null
             val e = eventRows[id] ?: return@mapNotNull null
             if (e.int("deleted") == 1) return@mapNotNull null
-            val begin = Instant.ofEpochMilli(r.long("begin") ?: return@mapNotNull null)
-            val end = Instant.ofEpochMilli(r.long("end") ?: return@mapNotNull null)
+            var beginMs = r.long("begin") ?: return@mapNotNull null
+            var endMs = r.long("end") ?: return@mapNotNull null
+            val dtstart = r.long("dtstart")
+            val tz = r["eventTimezone"].orEmpty()
+            if (!r["rrule"].isNullOrBlank() && dtstart != null) {
+                TimeZones.correct(beginMs, endMs, dtstart, tz, knownToAndroid)?.let { (b, en) ->
+                    beginMs = b
+                    endMs = en
+                }
+            }
+            val begin = Instant.ofEpochMilli(beginMs)
+            val end = Instant.ofEpochMilli(endMs)
             val b = begin.atZone(zone)
             val en = end.atZone(zone)
             val originalSyncId = e["original_sync_id"]?.ifBlank { null }

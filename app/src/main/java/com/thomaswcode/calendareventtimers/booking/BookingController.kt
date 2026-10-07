@@ -6,6 +6,7 @@ import com.thomaswcode.calendareventtimers.calendar.CalendarStore
 import com.thomaswcode.calendareventtimers.calendar.ProviderCalendar
 import com.thomaswcode.calendareventtimers.data.AnswerKind
 import com.thomaswcode.calendareventtimers.data.BookingStore
+import com.thomaswcode.calendareventtimers.engine.LabelCachePolicy
 import com.thomaswcode.calendareventtimers.engine.LabelPass
 import com.thomaswcode.calendareventtimers.engine.LabelTarget
 import com.thomaswcode.calendareventtimers.outlook.AppScope
@@ -165,8 +166,11 @@ object BookingController {
             if (stopped != null) problems += "Reading labels stopped early: $stopped"
         }
         val read = reads.mapNotNull { (t, r) -> (r as? LabelRead.Read)?.let { t to it.categories } }.toMap()
+        // In the phone's calendar but not in Outlook: remembered, and counted as unlabelled (never offered).
+        val absent = reads.filterValues { it is LabelRead.Absent }.keys
+        absent.forEach { ScanLog.i("Not in Outlook, left out: ${it.title} ${it.date} ${it.start}") }
         // The cache proved unreliable: what it gave this run is left out too.
-        val distrusted = labels.remember(read, Instant.now()) && labelPlan.known.isNotEmpty()
+        val distrusted = labels.remember(read, Instant.now(), absent) && labelPlan.known.isNotEmpty()
         val reused = if (distrusted) emptyMap() else labelPlan.known
         reads.values.forEach { if (it is LabelRead.Problem) problems += it.message }
         if (distrusted) problems += LabelPass.distrusted(candidates.count { it.labelKey in labelPlan.known })
@@ -177,7 +181,7 @@ object BookingController {
         val out = BookingPlanner.plan(
             BookingPlanner.Input(
                 events = events,
-                labels = reused + read.mapKeys { it.key.labelKey },
+                labels = reused + read.mapKeys { it.key.labelKey } + absent.associate { it.labelKey to listOf(LabelCachePolicy.ABSENT) },
                 attendees = attendees,
                 known = bookings.known(keys),
                 answers = bookings.answers(keys),
