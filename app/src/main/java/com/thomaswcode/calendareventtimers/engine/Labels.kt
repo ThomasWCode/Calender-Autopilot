@@ -17,9 +17,20 @@ data class CachedLabels(val changeKey: String, val categories: List<String>, val
 object LabelCachePolicy {
     val MAX_AGE: Duration = Duration.ofDays(30)
 
+    /**
+     * Stored in place of labels for an event the phone's calendar has but Outlook doesn't show
+     * ([com.thomaswcode.calendareventtimers.outlook.LabelRead.Absent]). It matches no label, so the
+     * event is simply not offered; it is trusted for [ABSENT_MAX_AGE] only, in case Outlook just
+     * hadn't shown it yet.
+     */
+    const val ABSENT = "<not in Outlook>"
+    val ABSENT_MAX_AGE: Duration = Duration.ofDays(7)
+
+    fun isAbsent(categories: List<String>?): Boolean = categories == listOf(ABSENT)
+
     fun reuse(cached: CachedLabels?, changeKey: String?, now: Instant): List<String>? {
         if (cached == null || changeKey == null || cached.changeKey != changeKey) return null
-        if (cached.readAt.isBefore(now.minus(MAX_AGE))) return null
+        if (cached.readAt.isBefore(now.minus(if (isAbsent(cached.categories)) ABSENT_MAX_AGE else MAX_AGE))) return null
         // Read "in the future": the clock was wrong then or now; don't trust it.
         if (cached.readAt.isAfter(now.plus(Duration.ofDays(1)))) return null
         return cached.categories
