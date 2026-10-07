@@ -87,6 +87,16 @@ class UiDriver(private val service: AccessibilityService) {
     /** All on-screen Outlook windows (the app and popups such as the view menu), topmost first, under one root. */
     fun snapshot(): LiveNode = LiveNode.root(outlookRoots().map { LiveNode.capture(it) })
 
+    /**
+     * A [snapshot] read afresh from Outlook, not from Android's cache of its screen: for values that
+     * change without the events the cache relies on (the time wheels, seen on 2026-10-07). Android 14
+     * and later; before that, the cache is all there is.
+     */
+    fun freshSnapshot(): LiveNode {
+        if (Build.VERSION.SDK_INT >= 34) runCatching { service.clearCache() }
+        return snapshot()
+    }
+
     private fun outlookRoots(): List<AccessibilityNodeInfo> {
         // Application windows only: fetching a root is a call into the window's process, and for our
         // own scan overlay that would mean our main thread answering every poll.
@@ -197,6 +207,61 @@ class UiDriver(private val service: AccessibilityService) {
         val info = (node as? LiveNode)?.info ?: return false
         return runCatching { info.performAction(AccessibilityNodeInfo.ACTION_PASTE) }.getOrDefault(false)
             .also { ScanLog.i("Paste into ${node.shortClass}: $it") }
+    }
+
+    /**
+     * Types [text] into the focused text field the way a keyboard does (the service's input method,
+     * Android 13+): unlike ACTION_SET_TEXT, the app sees each character typed, so a comma after an
+     * address turns it into a chip in Outlook's Add People (seen on 2026-10-07). False when no field
+     * is taking input.
+     */
+    fun type(text: String): Boolean {
+        val connection = runCatching { service.inputMethod?.currentInputConnection }.getOrNull() ?: return false.also {
+            ScanLog.w("No input connection to type into")
+        }
+        return runCatching {
+            connection.commitText(text, 1, null)
+            true
+        }.getOrDefault(false).also { ScanLog.i("Typed ${text.length} chars: $it") }
+    }
+
+    /** Types [text] one character at a time through the service's input method ([type]). */
+    suspend fun typeEach(text: String, gapMs: Long = 40): Boolean {
+        for (ch in text) {
+            if (!type(ch.toString())) return false
+            delay(gapMs)
+        }
+        return true
+    }
+
+    /**
+     * Pastes the clipboard into the focused field through the service's input method, as a
+     * keyboard's Paste does (Android 13+): works on Outlook's description editor, a WebView that
+     * refuses ACTION_PASTE (seen on 2026-10-07), and keeps an HTML clip's formatting.
+     */
+    fun imePaste(): Boolean {
+        val connection = runCatching { service.inputMethod?.currentInputConnection }.getOrNull() ?: return false
+        return runCatching {
+            connection.performContextMenuAction(android.R.id.paste)
+            true
+        }.getOrDefault(false).also { ScanLog.i("Paste through the input method: $it") }
+    }
+
+    /** A key pressed and released through the service's input method (Android 13+). */
+    fun key(keyCode: Int): Boolean {
+        val connection = runCatching { service.inputMethod?.currentInputConnection }.getOrNull() ?: return false
+        return runCatching {
+            connection.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, keyCode))
+            connection.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, keyCode))
+            true
+        }.getOrDefault(false).also { ScanLog.i("Key $keyCode: $it") }
+    }
+
+    /** The keyboard's Enter key on a focused text field (ACTION_IME_ENTER). */
+    fun imeEnter(node: UiNode): Boolean {
+        val info = (node as? LiveNode)?.info ?: return false
+        return runCatching { info.performAction(AccessibilityAction.ACTION_IME_ENTER.id) }.getOrDefault(false)
+            .also { ScanLog.i("IME enter on ${node.shortClass}: $it") }
     }
 
     /** Input focus on a node (a text field, or an editor inside a WebView). */

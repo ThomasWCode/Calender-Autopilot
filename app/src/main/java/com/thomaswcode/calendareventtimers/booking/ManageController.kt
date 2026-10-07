@@ -308,7 +308,9 @@ object ManageController {
                     }
                     val booker = BookingNavigator(navigator, service)
                     val outcome = action(booker, settings)
-                    recorded = withContext(NonCancellable) { apply(app, booking, outcome, peopleAfter) } + booker.stopRun?.let { " $it" }.orEmpty()
+                    // Anyone Outlook didn't confirm was taken off again, so isn't recorded as told.
+                    val people = peopleAfter?.filterNot { it.lowercase() in booker.notAdded }
+                    recorded = withContext(NonCancellable) { apply(app, booking, outcome, people) } + booker.stopRun?.let { " $it" }.orEmpty()
                 }
                 recorded ?: "Nothing was done."
             } catch (e: CancellationException) {
