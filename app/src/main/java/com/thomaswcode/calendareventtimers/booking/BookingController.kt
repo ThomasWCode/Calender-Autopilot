@@ -142,7 +142,7 @@ object BookingController {
         val daySet = days.toSet()
         val events = withContext(Dispatchers.IO) { store.occurrencesOn(calendar, days.first(), days.last(), zone) }
         val candidates = events.filter { BookingPlanner.isCandidateEvent(it, daySet, now) }
-        val attendees = withContext(Dispatchers.IO) { store.attendees(events.map { it.eventId }) }
+        val attendees = RoomCover.withoutStaleRooms(events, withContext(Dispatchers.IO) { store.attendees(events.map { it.eventId }) }, Prefs.rooms.value)
 
         val labels = LabelPass(app)
         val labelPlan = labels.plan(candidates, now)
@@ -350,7 +350,8 @@ object BookingController {
     ): Recheck = withContext(Dispatchers.IO) {
         val events = store.occurrencesOn(calendar, c.event.date, c.event.date, zone)
         val known = BookingStore.get(app).known(listOf(c.key))[c.key]
-        BookingPlanner.recheck(c, a, events, store.attendees(events.map { it.eventId }.distinct()), known, rooms, mine, Instant.now(), made)
+        val attendees = RoomCover.withoutStaleRooms(events, store.attendees(events.map { it.eventId }.distinct()), rooms)
+        BookingPlanner.recheck(c, a, events, attendees, known, rooms, mine, Instant.now(), made)
     }
 
     private suspend fun record(

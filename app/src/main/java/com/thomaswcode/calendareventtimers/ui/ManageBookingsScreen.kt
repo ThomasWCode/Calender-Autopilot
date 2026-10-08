@@ -214,7 +214,8 @@ private fun BookingCard(
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("${b.start}–${b.end}  ${b.originalTitle}", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    "${b.room ?: "?"} · $reply" + if (m.notified.isEmpty()) "" else " · told ${m.notified.size}",
+                    // No room known (a booking found in the calendar without one): its reply says so.
+                    listOfNotNull(b.room, reply).joinToString(" · ") + if (m.notified.isEmpty()) "" else " · told ${m.notified.size}",
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (trouble) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -17,10 +17,10 @@ Outlook keeps in sync), and Outlook is opened only for labels not read before an
 The design and the reasoning behind it are in [PLAN.md](PLAN.md) (alarms) and
 [PLAN-ROOM-BOOKING.md](PLAN-ROOM-BOOKING.md) (room booking, the shared engine).
 
-> **Status, 2026-10-06:** room booking and the engine were built without the phone on 2026-10-05 and
-> reviewed on PR #1 (eight rounds of Codex's review and another agent's review); they haven't run on
-> the phone yet. [PHONE-CHECKS.md](PHONE-CHECKS.md) lists what to check there first, in order;
-> [QUESTIONS.md](QUESTIONS.md) the open questions and the answers the code assumes meanwhile.
+> **Status, 2026-10-08:** room booking and the engine were built without the phone on 2026-10-05,
+> reviewed on PR #1, then run on the phone on 2026-10-07/08, including real bookings of test events
+> (PRs #2 and #3). [PHONE-CHECKS.md](PHONE-CHECKS.md) has the results and the few checks left for the
+> user (rotation, and those needing a colleague); [QUESTIONS.md](QUESTIONS.md) the answered questions.
 
 ## Build and install
 
@@ -42,6 +42,8 @@ provider's rows, the label cache, and every booking rule):
 ./gradlew testDebugUnitTest
 ```
 
+CI (`.github/workflows/ci.yml`) builds, runs the unit tests and lint on every pull request.
+
 ## First-time setup on the phone
 
 Open the app; a **Finish setting up** card lists anything missing, and **⋮ → Setup checklist**
@@ -59,7 +61,8 @@ has a button for each item.
 
 ## Using it
 
-Opening the app shows **Timers** and **Room booking** (also when you come back after 15 minutes).
+Opening the app shows **Timers** and **Room booking**, wherever you left it. Not when a run brings
+the app back to its own screen, nor when you come back from a settings screen the app opened.
 
 ### Timers
 
@@ -68,7 +71,8 @@ Opening the app shows **Timers** and **Room booking** (also when you come back a
   status bar says what it is doing; **STOP** ends it), and not at all when every label is remembered.
 - The **review** lists the Moveable/Immoveable events still to come, each with *Set alarm* (on) and
   *5 min before* (off). Events that already have an alarm from this app show *✓ Alarm already set*.
-  Today's events that have started are left out.
+  Today's events that have started are left out, and so are events the phone's calendar still has
+  but Outlook doesn't (an occurrence left behind when a series moved; remembered for a week).
 - **Upcoming alarms** lists what is set; **✕** cancels one (with Undo). Ringing alarms offer
   **Snooze 5 min** and **Dismiss**; unanswered ones stop after 10 minutes and leave a *Missed alarm*
   notification.
@@ -91,15 +95,18 @@ Alarm labels read `Title (Label) @ Location`, with meeting links shortened: `Kri
 - The **summary** shows every event, who will be told and how long Outlook will be on screen. **Book
   Rooms** books them in one go: for each, a new Outlook event with the same time (set on Outlook's
   *Choose Time* wheels), the first free room of your list (Location → *Or browse with Room Finder* →
-  KS-Rooms), the title `Room Booking - …`, the people, the same description and no alert. Before
-  Save, the time, room, title and alert are read back, and each person told must show on a chip by
-  their address (the description is checked only roughly); a failed step, or STOP, discards the
-  form. Just before each booking the event is checked in the phone's calendar again: one moved,
+  KS-Rooms), the title `Room Booking - …`, the people, the same description (with its formatting
+  and links), no alert and no Zoom meeting. Before Save, the time, room, title and alert are read
+  back. Each person told must show on a chip by their address: anyone Outlook doesn't confirm is
+  taken off again and named in the results as not told, and the room is still booked. A failed
+  step, or STOP, discards the form. Just before each booking the event is checked in the phone's calendar again: one moved,
   renamed, cancelled or given a room since you answered isn't booked (run again), and people no
   longer invited aren't told. A room counts as free only when Room Finder says plain *Free*.
 - The **results** say what each event got: booked (with the room's reply as it arrives: *Reserved*,
   *Declined*…), no free room, failed, or *maybe booked* when Outlook didn't show whether it saved
-  (check Outlook; the app finds out from the calendar). Rooms not in Room Finder are named.
+  (check Outlook; the app finds out from the calendar). Rooms not in Room Finder are named. Only
+  bookings whose room holds count as booked; a room can decline within seconds even when Room
+  Finder showed it free.
 - **⋮ → Manage bookings**: your bookings from today on, with warnings (room declined or taken off,
   event moved or gone), and any `Room Booking - …` events of yours the app has no record of; per
   booking *Change room*, *Edit people*, *Delete booking* (Outlook sends the cancellations; nothing
@@ -113,7 +120,8 @@ Alarm labels read `Title (Label) @ Location`, with meeting links shortened: `Kri
   labels.
 
 While a booking runs, the description is pasted through the clipboard, which is cleared afterwards
-(anything you had copied is gone).
+(anything you had copied is gone). The app types into Outlook's form as a keyboard would (the
+Outlook reader can act as the input method); the on-screen keyboard stays hidden meanwhile.
 
 Whenever the app is working in Outlook (timers or rooms), the screen stays upright: turning the
 phone doesn't turn it to landscape. The strip over the status bar holds it, as if auto-rotate were
@@ -132,6 +140,10 @@ off, and lets go when the run ends; your auto-rotate setting itself is never cha
 | Alarms (Room, device-protected storage); labels, bookings, answers (`autopilot.db`) | `data/` |
 | Scheduling, ringing, rescheduling after reboot/update | `alarm/` |
 | Screens | `ui/` |
+
+Repeating events in a time zone Android no longer knows (`US/Pacific-New`, made in old Outlook
+versions) are repeated by the calendar provider in GMT, an hour out after a clock change; the app
+moves them back to their clock time (`calendar/TimeZones.kt`).
 
 Alarms are set with `AlarmManager.setAlarmClock()`, so they are exact in Doze and show as the
 phone's next alarm. AlarmManager forgets alarms on reboot and force-stop, so they are re-registered
@@ -156,7 +168,8 @@ change, and every time the app opens.
   ```
 
 - **Trying one booking step** (debug builds): probes act on the Outlook screen showing and never save
-  anything; see `outlook/DebugProbes.kt` and [PHONE-CHECKS.md](PHONE-CHECKS.md) part B:
+  anything, except `create_event`, `edit_event` and `delete_event`, which make, change and delete
+  test events for the phone checks; see `outlook/DebugProbes.kt` and [PHONE-CHECKS.md](PHONE-CHECKS.md):
 
   ```bash
   adb shell am broadcast -a com.thomaswcode.calendareventtimers.DEBUG_PROBE --es probe screen

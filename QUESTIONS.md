@@ -68,3 +68,11 @@ settings* permission.
 **Q18. People whose chip doesn't show an address** (answered 2026-10-07): **remove just the people
 who couldn't be verified, book the room anyway, and say who wasn't added.** Before, the whole
 booking failed. `BookingNavigator.typePeople`, the results' notes.
+
+## Open (from the phone checks, 2026-10-08)
+
+**Q19. KS-103D declines**: it is first in the room list, so every booking tries it first, and both
+test bookings in it (06:00 on 8 Oct) were **declined within seconds** although Room Finder showed it
+*Free* (KS-117 accepted at once). It may only accept some people or some hours. Keep it first, move
+it down, or take it out of the list (Settings → Rooms)? Until then the app leaves the list as it is:
+a declined booking shows *Declined: try another room* and *Change room* picks the next free one.

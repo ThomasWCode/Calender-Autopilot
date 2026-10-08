@@ -535,7 +535,8 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
 
     private suspend fun clearLocations() {
         if (LocationReader.chips(driver.snapshot()).isEmpty()) return
-        val clear = LocationReader.clearButton(driver.snapshot()) ?: fail("No 'Clear location' in Add Location")
+        // While Add Location loads, a spinner stands where the clear button goes (seen on 2026-10-08).
+        val clear = driver.waitFor(6_000) { LocationReader.clearButton(it) } ?: fail("No 'Clear location' in Add Location")
         driver.click(clear, "Clear location")
         if (!driver.waitUntil(3_000) { LocationReader.chips(driver.snapshot()).isEmpty() }) fail("The old location didn't clear")
     }

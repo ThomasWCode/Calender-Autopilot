@@ -130,6 +130,30 @@ object RoomCover {
     /** The room from the list that invitee [a] is, by name or address. */
     private fun listedRoom(a: Attendee, rooms: List<String>): String? = RoomChoice.roomIn(a.name, rooms) ?: RoomChoice.roomIn(a.email, rooms)
 
+    /**
+     * [attendees] (by event id) without the room invitees that their event's location doesn't name.
+     * Outlook names every room of an event in its location, declined ones too (every event looked at
+     * on 2026-10-08). But when the last room comes off an event, Outlook's sync leaves that room's
+     * invitee row in the phone's calendar, still "accepted" (PHONE-CHECKS.md D7, 2026-10-08:
+     * Outlook showed no room, the location was empty, KS-117 stayed accepted). Such a row would
+     * count as a room the event doesn't have. Events not in [events] keep their invitees.
+     */
+    fun withoutStaleRooms(events: List<CalEvent>, attendees: Map<Long, List<Attendee>>, rooms: List<String>): Map<Long, List<Attendee>> {
+        val location = events.associate { it.eventId to it.location }
+        return attendees.mapValues { (id, list) ->
+            if (id !in location) list else list.filter { a -> !isRoom(a, rooms) || namedIn(location[id], a, rooms) }
+        }
+    }
+
+    private fun isRoom(a: Attendee, rooms: List<String>): Boolean = a.isResource || listedRoom(a, rooms) != null
+
+    /** Whether [location] names invitee [a]'s room, by its name in the list, its own name or its address. */
+    private fun namedIn(location: String?, a: Attendee, rooms: List<String>): Boolean {
+        if (location.isNullOrBlank()) return false
+        val names = listOfNotNull(listedRoom(a, rooms), a.name, a.email?.substringBefore('@')).filter { it.isNotBlank() }
+        return names.any { n -> RoomChoice.namesRoom(location, n) || RoomChoice.roomIn(location, listOf(n)) != null }
+    }
+
     /** A booking event's room and its reply, from its invitees; null when it has no room. */
     fun roomReply(attendees: List<Attendee>, rooms: List<String>): Pair<String, RoomReply>? = roomReplies(attendees, rooms).firstOrNull()
 

@@ -1,9 +1,16 @@
 package com.thomaswcode.calendareventtimers
 
 import com.thomaswcode.calendareventtimers.booking.FormText
+import com.thomaswcode.calendareventtimers.booking.RoomCover
+import com.thomaswcode.calendareventtimers.booking.RoomList
+import com.thomaswcode.calendareventtimers.booking.RowOutcome
+import com.thomaswcode.calendareventtimers.calendar.Attendee
 import com.thomaswcode.calendareventtimers.calendar.CalEvent
 import com.thomaswcode.calendareventtimers.calendar.CalendarRows
 import com.thomaswcode.calendareventtimers.calendar.TimeZones
+import com.thomaswcode.calendareventtimers.data.BookingEntity
+import com.thomaswcode.calendareventtimers.data.BookingState
+import com.thomaswcode.calendareventtimers.data.RoomReply
 import com.thomaswcode.calendareventtimers.engine.CachedLabels
 import com.thomaswcode.calendareventtimers.engine.LabelCachePolicy
 import com.thomaswcode.calendareventtimers.engine.LabelTargets
@@ -15,6 +22,8 @@ import com.thomaswcode.calendareventtimers.outlook.PeopleReader
 import com.thomaswcode.calendareventtimers.outlook.UiNode
 import com.thomaswcode.calendareventtimers.ui.AppNav
 import com.thomaswcode.calendareventtimers.ui.Page
+import com.thomaswcode.calendareventtimers.ui.ReplyText
+import com.thomaswcode.calendareventtimers.ui.bookingSummary
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -246,5 +255,81 @@ class PhoneChecksReviewTest {
             if (it < 2) absent += next
         }
         assertTrue(LabelTargets.retry(events, emptySet(), tried, absent).isEmpty())
+    }
+}
+
+class ResultsSummaryTest {
+    @Test
+    fun aDeclinedBookingIsNotCountedAsBooked() {
+        // Seen on 2026-10-08: a 06:00 booking declined by its room was shown as "1 booked".
+        val declined = RowOutcome.Booked("KS-103D", saved = true, notes = emptyList(), bookingId = 1)
+        val waiting = RowOutcome.Booked("KS-117", saved = true, notes = emptyList(), bookingId = 2)
+        val reserved = RowOutcome.Booked("KS-121", saved = true, notes = emptyList(), bookingId = 3)
+        val replies = mapOf(1L to RoomReply.DECLINED, 2L to RoomReply.WAITING, 3L to RoomReply.RESERVED)
+        assertEquals("2 booked · 1 declined", ReplyText.resultsSummary(listOf(declined, waiting, reserved), replies, dryRun = false))
+        // Before any reply is read, a saved booking counts.
+        assertEquals("1 booked", ReplyText.resultsSummary(listOf(declined), emptyMap(), dryRun = false))
+        val dry = RowOutcome.Booked("KS-103D", saved = false, notes = emptyList(), bookingId = null)
+        assertEquals("1 would be booked · 1 not done", ReplyText.resultsSummary(listOf(dry, RowOutcome.NotDone("Stopped.")), emptyMap(), dryRun = true))
+    }
+}
+
+class StaleRoomRowsTest {
+    private fun event(id: Long, location: String?) = CalEvent(
+        eventId = id, syncId = "s$id", changeKey = "k", originalSyncId = null, recurring = false, title = "Room Booking - CA test A",
+        begin = ZonedDateTime.of(2026, 10, 8, 6, 0, 0, 0, ProviderRows.london).toInstant(),
+        end = ZonedDateTime.of(2026, 10, 8, 6, 30, 0, 0, ProviderRows.london).toInstant(),
+        date = LocalDate.of(2026, 10, 8), start = LocalTime.of(6, 0), endDate = LocalDate.of(2026, 10, 8), endTime = LocalTime.of(6, 30),
+        allDay = false, location = location, organizer = "eiderwhi@lshtm.ac.uk", selfStatus = 0, cancelled = false,
+    )
+
+    private fun room(name: String, status: Int) = Attendee(name, "${name.lowercase()}@lshtm.onmicrosoft.com", Attendee.TYPE_RESOURCE, status)
+
+    @Test
+    fun aRoomTheLocationNoLongerNamesIsDropped() {
+        val rooms = RoomList.DEFAULT
+        val person = Attendee("Sam", "sam@lshtm.ac.uk", Attendee.TYPE_REQUIRED, Attendee.STATUS_ACCEPTED)
+        val events = listOf(
+            event(1, ""), // the room taken off in Outlook: its row stays, accepted
+            event(2, "KS-117; KS-117"), // as Outlook names a room picked from Recent on an Edit form
+            event(3, "https://lshtm.zoom.us/j/876; KS-119a"), // a colleague's meeting
+            event(4, "KS-103D"), // a room that declined stays in the location
+        )
+        val attendees = mapOf(
+            1L to listOf(room("KS-117", Attendee.STATUS_ACCEPTED), person),
+            2L to listOf(room("KS-117", Attendee.STATUS_ACCEPTED)),
+            3L to listOf(room("KS-119a", Attendee.STATUS_DECLINED)),
+            4L to listOf(room("KS-103D", Attendee.STATUS_DECLINED)),
+            5L to listOf(room("KS-121", Attendee.STATUS_ACCEPTED)), // an event not looked at: kept
+        )
+        val out = RoomCover.withoutStaleRooms(events, attendees, rooms)
+        assertEquals(listOf(person), out[1L])
+        assertEquals(attendees[2L], out[2L])
+        assertEquals(attendees[3L], out[3L])
+        assertEquals(attendees[4L], out[4L])
+        assertEquals(attendees[5L], out[5L])
+        assertNull(RoomCover.roomReply(out[1L]!!, rooms))
+    }
+}
+
+class LauncherBookingLineTest {
+    private fun booking(date: String, reply: RoomReply) = BookingEntity(
+        occurrenceKey = "k$date$reply", seriesKey = "s", originalEventId = 1, originalTitle = "T", eventDate = date, start = "06:00", end = "06:30",
+        bookingTitle = "Room Booking - T", room = "KS-117", notified = "", state = BookingState.SAVED, roomReply = reply,
+        bookingSyncId = null, createdAt = 0, checkedAt = null,
+    )
+
+    @Test
+    fun whatNeedsLookingAtComesFirst() {
+        // Seen on 2026-10-08: "This week: 0 booked · Next week: not booked yet · 1 withou…" cut off.
+        val monday = LocalDate.of(2026, 10, 5)
+        assertEquals(
+            "1 without a room · This week: 0 booked · Next week: not booked yet",
+            bookingSummary(listOf(booking("2026-10-08", RoomReply.NO_ROOM)), monday),
+        )
+        assertEquals(
+            "This week: 1 booked · Next week: 1 booked",
+            bookingSummary(listOf(booking("2026-10-08", RoomReply.RESERVED), booking("2026-10-13", RoomReply.WAITING)), monday),
+        )
     }
 }
