@@ -1,10 +1,10 @@
-# Phone checks (deferred)
+# Phone checks
 
 Room booking and the shared engine ([PLAN-ROOM-BOOKING.md](PLAN-ROOM-BOOKING.md)) were built on
 2026-10-05 **without the phone**, then reviewed on 2026-10-06 (seven rounds of Codex's review on
-PR #1 and another agent's review). Everything compiles and the unit tests pass against the screens
-captured on 2026-10-05, but **nothing has run on the Pixel yet**. This is what to check there, in
-order, with what to record. Questions for the user are in [QUESTIONS.md](QUESTIONS.md).
+PR #1 and another agent's review). **They were run on the Pixel 8a (Android 17, Outlook 5.2638.1)
+on 2026-10-07/08**: the results and what was fixed are in [Results](#results-2026-10-0708) below;
+the tables after it say what each check is. Questions for the user are in [QUESTIONS.md](QUESTIONS.md).
 
 Rules for testing on the phone (the user's, 2026-10-05): look at calendar events, **never emails**;
 any event created must have **no invitees** and be **deleted afterwards**. A room counts as an
@@ -14,6 +14,64 @@ go-ahead** (part D, QUESTIONS.md Q13). Parts A–C send nothing: drafts are alwa
 Order: A (read only) → B (one step at a time on Outlook's form, nothing saved) → C (dry runs) → D
 (real bookings). An early failure usually explains later ones, so fix as you go. Updated on
 2026-10-06 for the review rounds: A9–A12, B1, B8, B11, C4, C9–C11 and D2–D15 are new or changed.
+
+## Results (2026-10-07/08)
+
+Run with the user's go-ahead (QUESTIONS.md Q13): calendar events looked at, never emails; test
+events `CA test A/B/C` with no invitees, in quiet slots on Thu 8 Oct (06:00–13:40), labelled in
+Outlook and deleted afterwards, as were their bookings. Debug probes made and deleted the test
+events (`create_event`, `edit_event`, `delete_event`; `rooms` set the room list for C5 and C7).
+
+**Left for the user:** A10 (rotation: needs someone to turn the phone), D5, D6 and D10 (need a
+consenting colleague: no invitees may be added yet), the C dry run with *Notify = Yes* (it would type
+real colleagues' addresses into a draft; only dummy addresses were allowed), A8 timings beyond those
+below. **To decide:** KS-103D declined both bookings made at 06:00 (00:14 and 00:53 on 8 Oct) though
+Room Finder showed it Free; it is first in the room list, so every run tries it first.
+
+| Check | Result |
+|---|---|
+| A1 | ✓ Launcher with both cards |
+| A2 | ✓ 26 of 28 labels read; review as the old scan. The cross-check found two gaps, both fixed: **series in `US/Pacific-New`** (removed from tzdata; Android repeats them in GMT, so after a clock change they were an hour out: provider 15:05, Outlook 16:05) are moved back to their clock time (`TimeZones`); **occurrences the provider has but Outlook doesn't** (a series moved to another day; six copies of one Friday series) are remembered as missing, per occurrence, for 7 days, and their series read at another occurrence |
+| A3 | ✓ All labels remembered, Outlook not opened |
+| A4 | ✓ A test event labelled Moveable in Outlook (event details → *Categorise*): `1 to read in Outlook`, only it opened. The change key (`sync_data3`) changed ~10 s after a move and after a label change |
+| A5 | Thu: `15:05 Weekly AI discussion` (stale series) not in the Day view; Fri: the six `Re: Rui ZHANG … [room added]` copies. Both now left out (A2) |
+| A6 | ✓ Started events skipped |
+| A7 | ✓ Without calendar access the whole-day scan reads 27 events, 12 labelled |
+| A9 | Not run (two same-title test events would only repeat what D9 showed for bookings) |
+| A11 | Not run (no alarm was set with calendar access off) |
+| A12 | ✓ One Outlook account; `Calendar` (id 34) owned by `eiderwhi@lshtm.ac.uk` |
+| B1 | ✓ Rows: People, All Day, Date `Thu 8 Oct, Tomorrow`, `Time (GMT+1)`, **Time zone** (new), Location, **Online Meeting (Zoom) switch** (new, off), Description, Attachments, Repeat, Alert `15 minutes before`, Show as, Private; account `richard.white@lshtm.ac.uk` |
+| B2 | ✓ `ACTION_SET_TEXT` sets the title |
+| B3–B6 | ✓ Drag picker, mode button → wheels; scrolling steps a wheel; hours wrap. Fixed: wheel values read stale from the accessibility cache (the service now receives every event type and reads a fresh snapshot), and the date wheel says *Yesterday/Today/Tomorrow* near today |
+| B7 | ✗ Text set on a wheel doesn't stick: stepping stays |
+| B8 | Fixed: `ACTION_SET_TEXT` (and Enter) never make a chip. Typing through the service's input method followed by a comma key does; the chip's description is `<address>`. Tapping a chip takes it off (or turns it into text, which is cleared). Anything that doesn't become a chip with an address asked for is taken off and named in the results (Q18) |
+| B9 | Fixed: the editor (a WebView, sometimes without its id) refuses `ACTION_PASTE`; a paste through the input method keeps bold and links. The form's Description row then shows the text |
+| B10 | ✓ Alert sheet |
+| B11 | ✓ KS-Rooms: 10 rooms a page with Free/Busy (only plain *Free* and *Busy* seen) |
+| B12 | ✓ Recent: 3 rooms with their status |
+| B13 | ✓ Keyboard hidden and back; typing through the input method works while it is hidden |
+| C1, C3 | ✓ 7 dry-run bookings in about 1.5 minutes (10–30 s each: the wheels take most of it) |
+| C2 | ✓ No `Room Booking -` event left |
+| C4 | ✓ STOP while the description was pasted: form discarded, *not done*, clipboard empty |
+| C5 | ✓ Only KS-184 in the list at a busy time: *No room in your list was free*; form discarded |
+| C6 | ✓ Back to the results after the run. Fixed: leaving the screen cancelled the reply refresh, logged as a failure |
+| C7 | ✓ Same room with the Recent shortcut on and off (at that time the first free room wasn't in Recent; at 06:00 it was, and the shortcut picked it) |
+| C8 | ✓ *Not done: it was moved, changed or deleted after you answered*; Outlook not opened |
+| C9 | ✓ |
+| C10 | ✓ *Dry run doesn't apply here: these changes are real* |
+| C11 | Not applicable: one account |
+| D1 | ✓ Saved with no prompt; the button is *Save*. The booking event is in the provider within seconds. Results said *1 booked* for a booking its room had declined: fixed, booked counts only rooms that hold |
+| D2 | KS-103D **declined** within 20 s (twice, at 06:00); KS-117 **accepted** within 30 s. A declined room stays in the location (attendee status 2) |
+| D3 | Fixed: *Change room* failed (`No 'Clear location'`): the clear button appears only once Add Location has loaded; it is now waited for. Then ✓: cleared, KS-117 from Recent, saved, no prompt. With a Zoom link added as a location: refused, nothing changed ✓. (A room picked from Recent on an Edit form shows twice in Outlook's location, `KS-117; KS-117`: harmless) |
+| D4 | ✓ Prompt `Delete the event?` [Delete]; the event left the provider at once; the row went, nothing came back |
+| D7 | Fixed: with the room taken off in Outlook, the provider kept the room's invitee row, *accepted*, for 17+ minutes (location empty, Outlook showing no room), so the app kept saying *Reserved*. A room invitee now counts only while the location names it; then *No room on it* with the warning ✓. The launcher's line now puts *1 without a room* first (it was cut off) |
+| D8 | Not run (STOP just after Save needs exact timing) |
+| D9 | ✓ Two `Room Booking - CA test A` events at 06:00 in KS-103D: *Delete booking* opened both, deleted nothing: *2 events … Outlook doesn't show which is the booking* |
+| D11 | Not run on a booking. An original moved in Outlook reached the provider in seconds (C8, D14) |
+| D12 | Not run as written. A room booked for part of an event's time shows as the note *KS-184 is booked for 13:05–13:30 (“calls”)* (C5) |
+| D13 | ✓ After *Clear data*, the booking was listed as *Found in your calendar*; *Change room* worked and showed *Changed just now: waiting for Outlook…*. (The app's data and alarms were put back afterwards) |
+| D14 | ✓ No room answered; then Yes, and the event moved in Outlook before *Book Rooms* (not done, C8); the next run suggests **Yes** |
+| D15 | ✓ The Room booking screen's week line (`0 booked · 1 without a room`). The results header and the launcher's order were fixed after (D1, D7) and are covered by unit tests; not seen again on the phone |
 
 ## 0. Install
 
@@ -147,24 +205,24 @@ Save as fixtures (`app/src/test/resources/fixtures/booking/`) with uiautomator d
 
 | Guess | Where | If wrong |
 |---|---|---|
-| ACTION_SET_TEXT works on the Compose title | `BookingNavigator.setTitle` | click the field, then set text again (already tried once) |
-| NumberPicker steps with ACTION_SCROLL_FORWARD/BACKWARD; the virtual rows click | `stepWheel` | B5 decides which first |
-| "a,b," in one ACTION_SET_TEXT makes chips | `typePeople` (falls back to one address at a time) | B8 |
-| Chips show their person's address | `typePeople`, `removePerson` (strict) | B8, D5: bookings that tell people fail (Q18) |
-| HTML paste into the WebView editor | `setDescription` (plain text fallback) | B9 |
+| ~~ACTION_SET_TEXT works on the Compose title~~ ✓ B2 | `BookingNavigator.setTitle` | — |
+| ~~NumberPicker steps with ACTION_SCROLL_FORWARD/BACKWARD~~ ✓ B5 (values read from a fresh snapshot) | `stepWheel` | — |
+| ~~"a,b," in one ACTION_SET_TEXT makes chips~~ ✗ B8: each address is typed through the input method, then a comma key | `typePeople` | — |
+| Chips show their person's address ✓ B8 (`<address>` description); a chip that doesn't is taken off and named (Q18) | `typePeople`, `PeopleReader.chips` | D5 with a real colleague |
+| ~~HTML paste into the WebView editor~~ ✗ B9: pasted through the input method instead (keeps formatting) | `setDescription` (plain text fallback) | — |
 | The form's Description row shows the text once set | `EventFormReader.descriptionRow` (found by position too) | a note "may not have been copied" in results |
 | The form's account row reads "Name, address" | `EventFormReader.accountAddress` | B1: **every booking fails** until the reader is fixed |
-| No prompt after Save | `save()` | D1: add the prompt to `PromptReader` and answer it |
-| Delete prompt labels | `deleteBooking`, `DELETE_CONFIRMATIONS` | D4 |
-| Removing a person from a chip | `removePerson` | D5 |
-| Room statuses are exactly Free/Busy | `RoomChoice.status` | B11 |
+| ~~No prompt after Save~~ ✓ D1 (a room, no people) | `save()` | with people: D6 |
+| ~~Delete prompt labels~~ ✓ D4: `Delete the event?` [Delete] | `deleteBooking`, `DELETE_CONFIRMATIONS` | — |
+| Removing a person: tapping the chip ✓ B8 (dummy address) | `removePerson`, `takeOff` | D5 with a real colleague |
+| Room statuses are exactly Free/Busy ✓ B11 (none other seen) | `RoomChoice.status` | — |
 | Outlook goes back to the Day view on the same day after Save | `ensureOnDay` before each booking | — (it's checked) |
-| After saving an **edited** event Outlook shows its details (the app closes them) or the calendar | `BookingNavigator.save` | D3: anywhere else it's reported as "maybe saved" |
+| ~~After saving an **edited** event Outlook shows its details~~ ✓ D3 | `BookingNavigator.save` | — |
 | Closed sub-screens (Add Location, Room Finder, Add People, picker) leave the tree, or at least stop being visible | the `visibleId` checks in `BookingReaders.kt`, `onlyForm` | every step would time out with "…didn't close" |
 | The booking event shows in the provider under its title at the original's start, organised by Outlook's account (`eiderwhi@…`, one of the user's addresses) | `BookingStore.matches`, `pair`, `ownBookingEvents`; `RoomCover.cover` | D1–D2: bookings never found, so missing after 15 minutes |
-| Booking events reach the provider within 15 minutes, Manage changes within about 2 | `BookingStore.synced` (sync grace), the Manage hold | D2–D5 timings |
-| A room that declines stays in the event's location | `RoomCover.cover` (the location doesn't count for a declined room) | D2 |
+| Booking events reach the provider within 15 minutes, Manage changes within about 2 ✓ D1–D3: seconds | `BookingStore.synced` (sync grace), the Manage hold | — |
+| ~~A room that declines stays in the event's location~~ ✓ D2. A room taken off stays an invitee, accepted (D7): counted only while the location names it | `RoomCover.cover`, `RoomCover.withoutStaleRooms` | — |
 | The details screen's time reads "HH:MM to HH:MM, duration: …" (seen in the captured screens) | `DetailsReader.read` → `end` | without it, Manage bookings tells events apart by title, start and room only. A missing end is let through for now; once D3–D5 show the end is always there, make it required (deferred from Codex's last review: requiring it before then could stop every Manage action) |
 | Opening a booking for Change room / Edit people / Delete finds exactly one event: title, start, end, room | `BookingNavigator.openForEdit` | D3–D5, D9 |
 | A visible overlay asking for portrait holds the screen upright | `ScanOverlay` (`screenOrientation`) | A10: Q17's fallback |
-| Outlook's LSHTM account has the only owned `Calendar` the app should read | `CalendarRows.mainCalendar` | A12 |
+| ~~Outlook's LSHTM account has the only owned `Calendar` the app should read~~ ✓ A12 | `CalendarRows.mainCalendar` | — |
