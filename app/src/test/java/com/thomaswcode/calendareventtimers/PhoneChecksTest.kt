@@ -158,6 +158,14 @@ class PhoneReadersTest {
     }
 
     @Test
+    fun theFormScrolls() {
+        // The rows below the screen (Repeat, Alert…) are reached by scrolling this list.
+        val scroller = EventFormReader.scroller(Fixtures.load("booking/new_event_form.xml"))
+        assertNotNull(scroller)
+        assertEquals("ScrollView", scroller!!.className?.substringAfterLast('.'))
+    }
+
+    @Test
     fun theDescriptionEditorsWebViewWithoutItsId() {
         val inner = node("android.webkit.WebView")
         val root = node(null, children = listOf(node("android.widget.LinearLayout", OutlookSelectors.DESCRIPTION_FIELD, desc = "Event description", children = listOf(node("android.webkit.WebView", children = listOf(inner))))))
@@ -294,6 +302,7 @@ class StaleRoomRowsTest {
             event(2, "KS-117; KS-117"), // as Outlook names a room picked from Recent on an Edit form
             event(3, "https://lshtm.zoom.us/j/876; KS-119a"), // a colleague's meeting
             event(4, "KS-103D"), // a room that declined stays in the location
+            event(6, ""),
         )
         val attendees = mapOf(
             1L to listOf(room("KS-117", Attendee.STATUS_ACCEPTED), person),
@@ -301,6 +310,8 @@ class StaleRoomRowsTest {
             3L to listOf(room("KS-119a", Attendee.STATUS_DECLINED)),
             4L to listOf(room("KS-103D", Attendee.STATUS_DECLINED)),
             5L to listOf(room("KS-121", Attendee.STATUS_ACCEPTED)), // an event not looked at: kept
+            // A room invited as a person: no location, Outlook shows it as an attendee (`calls`).
+            6L to listOf(Attendee("KS-184", "KS-184@lshtm.ac.uk", Attendee.TYPE_REQUIRED, Attendee.STATUS_ACCEPTED)),
         )
         val out = RoomCover.withoutStaleRooms(events, attendees, rooms)
         assertEquals(listOf(person), out[1L])
@@ -308,7 +319,9 @@ class StaleRoomRowsTest {
         assertEquals(attendees[3L], out[3L])
         assertEquals(attendees[4L], out[4L])
         assertEquals(attendees[5L], out[5L])
+        assertEquals(attendees[6L], out[6L])
         assertNull(RoomCover.roomReply(out[1L]!!, rooms))
+        assertEquals("KS-184", RoomCover.roomReply(out[6L]!!, rooms)?.first)
     }
 }
 

@@ -93,6 +93,9 @@ object EventFormReader {
 
     private fun form(root: UiNode): UiNode? = root.find { it.shortClass == "ScrollView" && it.find { n -> n.shortClass == "EditText" || n.isTextView && cleanUiText(n.text) == TEXT_DATE } != null }
 
+    /** The form's scrolling list: it holds only the rows on screen. */
+    fun scroller(root: UiNode): UiNode? = form(root)?.takeIf { it.scrollable }
+
     /** The title field (an EditText with a "Title" placeholder while empty). */
     fun titleField(root: UiNode): UiNode? = form(root)?.find { it.shortClass == "EditText" }
 

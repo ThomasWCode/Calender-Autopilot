@@ -131,21 +131,21 @@ object RoomCover {
     private fun listedRoom(a: Attendee, rooms: List<String>): String? = RoomChoice.roomIn(a.name, rooms) ?: RoomChoice.roomIn(a.email, rooms)
 
     /**
-     * [attendees] (by event id) without the room invitees that their event's location doesn't name.
-     * Outlook names every room of an event in its location, declined ones too (every event looked at
-     * on 2026-10-08). But when the last room comes off an event, Outlook's sync leaves that room's
-     * invitee row in the phone's calendar, still "accepted" (PHONE-CHECKS.md D7, 2026-10-08:
-     * Outlook showed no room, the location was empty, KS-117 stayed accepted). Such a row would
-     * count as a room the event doesn't have. Events not in [events] keep their invitees.
+     * [attendees] (by event id) without the room resources that their event's location doesn't name.
+     * A room chosen as a location is a resource invitee, and Outlook names it in the location,
+     * declined or not. When it comes off the event, Outlook's sync leaves its resource row in the
+     * phone's calendar, still "accepted", while the location goes empty and Outlook shows no room
+     * (PHONE-CHECKS.md D7, 2026-10-08): such a row would count as a room the event doesn't have. A
+     * room invited as a person (an ordinary invitee, `KS-184@lshtm.ac.uk`) has no location, and
+     * Outlook shows it as an attendee: it stays (seen the same day on `calls`). Events not in
+     * [events] keep their invitees.
      */
     fun withoutStaleRooms(events: List<CalEvent>, attendees: Map<Long, List<Attendee>>, rooms: List<String>): Map<Long, List<Attendee>> {
         val location = events.associate { it.eventId to it.location }
         return attendees.mapValues { (id, list) ->
-            if (id !in location) list else list.filter { a -> !isRoom(a, rooms) || namedIn(location[id], a, rooms) }
+            if (id !in location) list else list.filter { a -> !a.isResource || namedIn(location[id], a, rooms) }
         }
     }
-
-    private fun isRoom(a: Attendee, rooms: List<String>): Boolean = a.isResource || listedRoom(a, rooms) != null
 
     /** Whether [location] names invitee [a]'s room, by its name in the list, its own name or its address. */
     private fun namedIn(location: String?, a: Attendee, rooms: List<String>): Boolean {
