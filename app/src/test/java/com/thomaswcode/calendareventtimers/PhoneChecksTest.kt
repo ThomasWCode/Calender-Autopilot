@@ -158,6 +158,14 @@ class PhoneReadersTest {
     }
 
     @Test
+    fun theFormScrolls() {
+        // The rows below the screen (Repeat, Alert…) are reached by scrolling this list.
+        val scroller = EventFormReader.scroller(Fixtures.load("booking/new_event_form.xml"))
+        assertNotNull(scroller)
+        assertEquals("ScrollView", scroller!!.className?.substringAfterLast('.'))
+    }
+
+    @Test
     fun theDescriptionEditorsWebViewWithoutItsId() {
         val inner = node("android.webkit.WebView")
         val root = node(null, children = listOf(node("android.widget.LinearLayout", OutlookSelectors.DESCRIPTION_FIELD, desc = "Event description", children = listOf(node("android.webkit.WebView", children = listOf(inner))))))
