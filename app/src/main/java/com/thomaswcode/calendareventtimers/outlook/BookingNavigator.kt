@@ -428,7 +428,7 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
      */
     private suspend fun chooseRoom(settings: RoomSettings, clearFirst: Boolean, current: String? = null): String? {
         missingRooms = emptyList()
-        val row = EventFormReader.locationRow(driver.snapshot()) ?: fail("Couldn't find the form's Location row")
+        val row = onForm("Location") { EventFormReader.locationRow(it) }
         nav.onProgress("Looking for a free room…")
         driver.click(row.node, "Location row")
         driver.waitFor(4_000) { if (LocationReader.isOpen(it)) true else null } ?: fail("Add Location didn't open")
@@ -528,7 +528,7 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         val done = LocationReader.doneButton(driver.snapshot()) ?: fail("No Done in Add Location")
         driver.click(done, "location Done")
         waitForForm("Add Location didn't close")
-        val shown = EventFormReader.location(driver.snapshot())
+        val shown = onForm("Location") { r -> EventFormReader.locationRow(r)?.let { EventFormReader.location(r).orEmpty() } }
         if (!RoomChoice.namesRoom(shown, name)) fail("The form's location reads '$shown', not $name")
         return name
     }
@@ -578,7 +578,7 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
     }
 
     private suspend fun openPeople() {
-        val row = EventFormReader.peopleRow(driver.snapshot()) ?: fail("Couldn't find the form's People row")
+        val row = onForm("People") { EventFormReader.peopleRow(it) }
         driver.click(row.node, "People row")
         driver.waitFor(4_000) { if (PeopleReader.isOpen(it)) true else null } ?: fail("Add People didn't open")
         PeopleReader.requiredTab(driver.snapshot())?.let { if (!it.selected) driver.click(it, "Required") }
@@ -693,7 +693,7 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
             openForEdit(date, start, end, title, room)
             if (newStart != null && newEnd != null) setTime(date, newStart, newEnd)
             if (clearLocation) {
-                val row = EventFormReader.locationRow(driver.snapshot()) ?: fail("Couldn't find the form's Location row")
+                val row = onForm("Location") { EventFormReader.locationRow(it) }
                 driver.click(row.node, "Location row")
                 driver.waitFor(4_000) { if (LocationReader.isOpen(it)) true else null } ?: fail("Add Location didn't open")
                 clearLocations()
@@ -727,7 +727,7 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
      */
     private suspend fun setDescription(raw: String) {
         nav.onProgress("Copying the description…")
-        val row = EventFormReader.descriptionRow(driver.snapshot()) ?: fail("Couldn't find the form's Description row")
+        val row = onForm("Description") { EventFormReader.descriptionRow(it) }
         driver.click(row.node, "Description row")
         driver.waitFor(4_000) { if (DescriptionReader.isOpen(it)) true else null } ?: fail("The description editor didn't open")
         delay(700) // the WebView's editor loads
@@ -756,7 +756,7 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         val done = DescriptionReader.doneButton(driver.snapshot()) ?: fail("No Done on the description editor")
         driver.click(done, "description Done")
         waitForForm("The description editor didn't close")
-        val shown = EventFormReader.descriptionRow(driver.snapshot())?.label
+        val shown = findOnForm { EventFormReader.descriptionRow(it) }?.label
         if (shown == null || shown.equals(OutlookSelectors.TEXT_DESCRIPTION, ignoreCase = true)) {
             notes += "the description may not have been copied"
             ScanLog.w("The form still says 'Description' after copying it")
@@ -786,7 +786,7 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
     }
 
     private suspend fun setAlertNone() {
-        val row = EventFormReader.alertRow(driver.snapshot()) ?: fail("Couldn't find the form's Alert row")
+        val row = onForm("Alert") { EventFormReader.alertRow(it) }
         if (row.value.equals(OutlookSelectors.TEXT_ALERT_NONE, ignoreCase = true)) return
         driver.click(row.node, "Alert row")
         driver.waitFor(3_000) { if (AlertSheetReader.isOpen(it)) true else null } ?: fail("The Alert list didn't open")
@@ -794,13 +794,13 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         driver.click(none, "Alert None")
         if (!driver.waitUntil(2_000) { !AlertSheetReader.isOpen(driver.snapshot()) }) driver.back()
         waitForForm("The Alert list didn't close")
-        val value = EventFormReader.alertRow(driver.snapshot())?.value
+        val value = onForm("Alert") { EventFormReader.alertRow(it) }.value
         if (!value.equals(OutlookSelectors.TEXT_ALERT_NONE, ignoreCase = true)) fail("The alert reads '$value', not None")
     }
 
     /** A booking is never a Zoom meeting: the Online Meeting switch (off by default) is turned off if on. */
     private suspend fun setOnlineMeetingOff() {
-        val switch = EventFormReader.onlineMeetingSwitch(driver.freshSnapshot()) ?: return
+        val switch = findOnForm { EventFormReader.onlineMeetingSwitch(it) } ?: return
         if (!switch.checked) return
         ScanLog.w("Online Meeting was on; turning it off")
         driver.click(switch, "Online Meeting switch")
@@ -810,25 +810,57 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
     }
 
     /**
-     * Reads the whole form back before saving (PLAN-ROOM-BOOKING.md §3.9 step 8). The people were
-     * checked on Add People's chips; how the form's People row shows them isn't known yet
-     * (PHONE-CHECKS.md E), so a row still reading "People" is only noted.
+     * Reads the whole form back before saving (PLAN-ROOM-BOOKING.md §3.9 step 8), each row wherever
+     * it is on the (scrolling) form. The people were checked on Add People's chips; a People row
+     * still reading "People" is only noted.
      */
-    private fun verifyForm(title: String, date: LocalDate, start: LocalTime, end: LocalTime, room: String, people: Int) {
-        val f = driver.freshSnapshot()
-        if (people > 0 && EventFormReader.peopleRow(f)?.label.equals(OutlookSelectors.TEXT_PEOPLE, ignoreCase = true)) {
+    private suspend fun verifyForm(title: String, date: LocalDate, start: LocalTime, end: LocalTime, room: String, people: Int) {
+        val peopleLabel = onForm("People") { EventFormReader.peopleRow(it) }.label
+        if (people > 0 && peopleLabel.equals(OutlookSelectors.TEXT_PEOPLE, ignoreCase = true)) {
             notes += "the form's People row didn't show the people added"
             ScanLog.w("People row still reads 'People' after adding $people")
         }
+        val shownTitle = onForm("title") { r -> EventFormReader.titleField(r)?.let { EventFormReader.title(r) } }
+        val shownDate = onForm("Date") { r -> EventFormReader.dateRow(r)?.let { formDate(r, date) ?: LocalDate.MIN } }
+        val shownTimes = onForm("Time") { r -> EventFormReader.timeRow(r)?.let { formTimes(r) ?: (LocalTime.MIN to LocalTime.MIN) } }
+        val shownLocation = onForm("Location") { r -> EventFormReader.locationRow(r)?.let { EventFormReader.location(r).orEmpty() } }
+        val alert = onForm("Alert") { EventFormReader.alertRow(it) }.value
+        val online = findOnForm { EventFormReader.onlineMeetingSwitch(it) }?.checked == true
         val wrong = listOfNotNull(
-            "title '${EventFormReader.title(f)}'".takeIf { !FormText.sameText(EventFormReader.title(f), title) },
-            "date ${formDate(f, date)}".takeIf { formDate(f, date) != date },
-            "time ${formTimes(f)}".takeIf { formTimes(f) != (start to end) },
-            "location '${EventFormReader.location(f)}'".takeIf { !RoomChoice.namesRoom(EventFormReader.location(f), room) },
-            "alert '${EventFormReader.alertRow(f)?.value}'".takeIf { !EventFormReader.alertRow(f)?.value.equals(OutlookSelectors.TEXT_ALERT_NONE, ignoreCase = true) },
-            "Online Meeting (on)".takeIf { EventFormReader.onlineMeetingSwitch(f)?.checked == true },
+            "title '$shownTitle'".takeIf { !FormText.sameText(shownTitle, title) },
+            "date $shownDate".takeIf { shownDate != date },
+            "time $shownTimes".takeIf { shownTimes != (start to end) },
+            "location '$shownLocation'".takeIf { !RoomChoice.namesRoom(shownLocation, room) },
+            "alert '$alert'".takeIf { !alert.equals(OutlookSelectors.TEXT_ALERT_NONE, ignoreCase = true) },
+            "Online Meeting (on)".takeIf { online },
         )
         if (wrong.isNotEmpty()) fail("Before saving, the form had the wrong ${wrong.joinToString()}")
+    }
+
+    /** [read] of the form, scrolling it to the row if it isn't on screen; the step fails if it can't be found. */
+    private suspend fun <T : Any> onForm(what: String, read: (UiNode) -> T?): T =
+        findOnForm(read) ?: fail("Couldn't find the form's $what row")
+
+    /**
+     * [read] of the form wherever it is: as it shows, else scrolling down, then up. The form only
+     * holds the rows on screen, and adding people puts *Attendee Options* and *Find a time* above
+     * the rest, pushing Repeat, Alert and the others below it (seen on 2026-10-08).
+     */
+    private suspend fun <T : Any> findOnForm(read: (UiNode) -> T?): T? {
+        read(driver.freshSnapshot())?.let { return it }
+        for (down in listOf(true, false)) {
+            for (step in 0 until MAX_FORM_SCROLLS) {
+                val before = driver.freshSnapshot()
+                val scroller = EventFormReader.scroller(before) ?: return null
+                if (!driver.scroll(scroller, forward = down)) break
+                delay(350)
+                val after = driver.freshSnapshot()
+                read(after)?.let { return it }
+                // The same rows as before: that end of the form is reached.
+                if (EventFormReader.rows(after).map { it.texts } == EventFormReader.rows(before).map { it.texts }) break
+            }
+        }
+        return null
     }
 
     /**
@@ -914,6 +946,7 @@ class BookingNavigator(private val nav: OutlookNavigator, private val context: C
         const val MAX_WHEEL_STEPS = 80
         const val MAX_ROOM_PAGES = 8
         const val MAX_DISCARD_STEPS = 10
+        const val MAX_FORM_SCROLLS = 6
         val DELETE_CONFIRMATIONS = setOf("delete", "yes", "ok", "send", "cancel event", "cancel meeting", "delete event")
         val SPACES = Regex("""\s+""")
     }
