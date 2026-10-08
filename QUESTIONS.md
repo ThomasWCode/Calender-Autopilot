@@ -71,8 +71,15 @@ booking failed. `BookingNavigator.typePeople`, the results' notes.
 
 ## Open (from the phone checks, 2026-10-08)
 
-**Q19. KS-103D declines**: it is first in the room list, so every booking tries it first, and both
-test bookings in it (06:00 on 8 Oct) were **declined within seconds** although Room Finder showed it
-*Free* (KS-117 accepted at once). It may only accept some people or some hours. Keep it first, move
-it down, or take it out of the list (Settings → Rooms)? Until then the app leaves the list as it is:
-a declined booking shows *Declined: try another room* and *Change room* picks the next free one.
+**Q19. KS-103D declines** (8 Oct; asked again: "Explain how it was declined - my testing does
+not show this"). What the phone's calendar recorded: each booking event had KS-103D as its room
+(a resource invitee), and the room's reply came back as **declined** (`attendeeStatus` 2), which
+Outlook syncs from the room's own answer: at 06:00, declined within 20 s (booked 00:13, again
+00:53), and at 07:15, declined within 7 minutes (booked 06:53). In the same slots **KS-117
+accepted** within 30 s. Room Finder showed KS-103D *Free* each time: it shows only whether the room
+is free, not whether it will accept the booking. All three were **before 08:00**: Exchange rooms are
+often set to accept only within working hours (or only from some people), which would explain why
+your daytime bookings are accepted. The room's decline is an email to you from KS-103D, which says
+why; the app doesn't read email. Nothing in the app needs changing for this: a decline shows
+*Declined: change the room*, and *Change room* takes the next free one. For you: check that email,
+and say whether to keep KS-103D first.

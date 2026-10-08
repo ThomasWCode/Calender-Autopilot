@@ -22,11 +22,11 @@ events `CA test A/B/C` with no invitees, in quiet slots on Thu 8 Oct (06:00–13
 Outlook and deleted afterwards, as were their bookings. Debug probes made and deleted the test
 events (`create_event`, `edit_event`, `delete_event`; `rooms` set the room list for C5 and C7).
 
-**Left for the user:** A10 (rotation: needs someone to turn the phone), D5, D6 and D10 (need a
-consenting colleague: no invitees may be added yet), the C dry run with *Notify = Yes* (it would type
-real colleagues' addresses into a draft; only dummy addresses were allowed), A8 timings beyond those
-below. **To decide:** KS-103D declined both bookings made at 06:00 (00:14 and 00:53 on 8 Oct) though
-Room Finder showed it Free; it is first in the room list, so every run tries it first.
+**With the user, 8 Oct 06:40–07:15:** A10 (rotation), the dry run with *Notify = Yes* (two real
+colleagues typed into a draft that was discarded; nothing sent), D8, D11 and D12 (on test event
+`CA test D`, 07:15, booked and deleted). **Still left:** D5, D6 and D10 (they need a consenting
+colleague; no invitees may be added yet). **To decide:** QUESTIONS.md Q19 (KS-103D declines before
+08:00).
 
 | Check | Result |
 |---|---|
@@ -38,6 +38,7 @@ Room Finder showed it Free; it is first in the room list, so every run tries it 
 | A6 | ✓ Started events skipped |
 | A7 | ✓ Without calendar access the whole-day scan reads 27 events, 12 labelled |
 | A9 | Not run (two same-title test events would only repeat what D9 showed for bookings) |
+| A10 | ✓ Turned sideways mid-run: the screen stayed upright, then turned once the run ended. A run started sideways: `Turning the screen upright for the run`, the screen turned first. The user saw nothing wrong |
 | A11 | Not run (no alarm was set with calendar access off) |
 | A12 | ✓ One Outlook account; `Calendar` (id 34) owned by `eiderwhi@lshtm.ac.uk` |
 | B1 | ✓ Rows: People, All Day, Date `Thu 8 Oct, Tomorrow`, `Time (GMT+1)`, **Time zone** (new), Location, **Online Meeting (Zoom) switch** (new, off), Description, Attachments, Repeat, Alert `15 minutes before`, Show as, Private; account `richard.white@lshtm.ac.uk` |
@@ -60,15 +61,17 @@ Room Finder showed it Free; it is first in the room list, so every run tries it 
 | C9 | ✓ |
 | C10 | ✓ *Dry run doesn't apply here: these changes are real* |
 | C11 | Not applicable: one account |
+| C + notify | Fixed, then ✓: a dry run telling two LSHTM invitees failed with *Couldn't find the form's Alert row*: people push the lower rows off the form's screen. Every row is now found by scrolling the form. Then both addresses were typed, confirmed as chips, Alert None set, and the form discarded; nothing saved or sent |
+| Room invited as a person | Fixed: the D7 fix dropped every room invitee the location doesn't name, but `calls` invites KS-184 as a person (no location), so four meetings were offered again. Only room *resources* not named in the location are dropped now |
 | D1 | ✓ Saved with no prompt; the button is *Save*. The booking event is in the provider within seconds. Results said *1 booked* for a booking its room had declined: fixed, booked counts only rooms that hold |
-| D2 | KS-103D **declined** within 20 s (twice, at 06:00); KS-117 **accepted** within 30 s. A declined room stays in the location (attendee status 2) |
+| D2 | KS-103D **declined** all three bookings, all before 08:00 (06:00 twice, 07:15), though Room Finder showed it Free; KS-117 **accepted** the same slots within 30 s (Q19). A declined room stays in the location (attendee status 2) |
 | D3 | Fixed: *Change room* failed (`No 'Clear location'`): the clear button appears only once Add Location has loaded; it is now waited for. Then ✓: cleared, KS-117 from Recent, saved, no prompt. With a Zoom link added as a location: refused, nothing changed ✓. (A room picked from Recent on an Edit form shows twice in Outlook's location, `KS-117; KS-117`: harmless) |
 | D4 | ✓ Prompt `Delete the event?` [Delete]; the event left the provider at once; the row went, nothing came back |
 | D7 | Fixed: with the room taken off in Outlook, the provider kept the room's invitee row, *accepted*, for 17+ minutes (location empty, Outlook showing no room), so the app kept saying *Reserved*. A room invitee now counts only while the location names it; then *No room on it* with the warning ✓. The launcher's line now puts *1 without a room* first (it was cut off) |
-| D8 | Not run (STOP just after Save needs exact timing) |
+| D8 | ✓ STOP pressed 0.7 s after Save on a *Change room*: the run finished the save, said *now KS-117*, and Manage bookings shows KS-117 *Reserved* |
 | D9 | ✓ Two `Room Booking - CA test A` events at 06:00 in KS-103D: *Delete booking* opened both, deleted nothing: *2 events … Outlook doesn't show which is the booking* |
-| D11 | Not run on a booking. An original moved in Outlook reached the provider in seconds (C8, D14) |
-| D12 | Not run as written. A room booked for part of an event's time shows as the note *KS-184 is booked for 13:05–13:30 (“calls”)* (C5) |
+| D11 | ✓ The booking shortened in Outlook to 07:15–07:30: the meeting is offered again with *KS-117 is booked for 07:15–07:30 (“Room Booking - CA test D”)*. (A room changed in Outlook: D7) |
+| D12 | ✓ The meeting made longer (to 08:00) with its booking still to 07:30: offered again, with the note that KS-117 holds it to 07:30 only |
 | D13 | ✓ After *Clear data*, the booking was listed as *Found in your calendar*; *Change room* worked and showed *Changed just now: waiting for Outlook…*. (The app's data and alarms were put back afterwards) |
 | D14 | ✓ No room answered; then Yes, and the event moved in Outlook before *Book Rooms* (not done, C8); the next run suggests **Yes** |
 | D15 | ✓ The Room booking screen's week line (`0 booked · 1 without a room`). The results header and the launcher's order were fixed after (D1, D7) and are covered by unit tests; not seen again on the phone |
