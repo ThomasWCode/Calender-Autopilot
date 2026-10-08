@@ -755,5 +755,6 @@ bookings). Where it differs from, or adds to, the sections above:
   them with real dumps).
 - **Debug probes** try one booking step at a time on whatever Outlook screen is showing, from adb,
   for the phone checks; logged dumps no longer blank the booking screens.
-- **Navigation.** A cold start, or coming back after 15 minutes away, opens the launcher; after an
-  Outlook run the app returns to that run's screen (QUESTIONS.md Q14).
+- **Navigation.** Opening the app shows the launcher, wherever it was left; after an Outlook run the
+  app returns to that run's screen, and back from a settings screen it opened, to where it was
+  (QUESTIONS.md Q14, answered 2026-10-07).
