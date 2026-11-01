@@ -41,6 +41,7 @@ colleague; no invitees may be added yet). **To decide:** QUESTIONS.md Q19 (KS-10
 | A10 | ✓ Turned sideways mid-run: the screen stayed upright, then turned once the run ended. A run started sideways: `Turning the screen upright for the run`, the screen turned first. The user saw nothing wrong |
 | A11 | Not run (no alarm was set with calendar access off) |
 | A12 | ✓ One Outlook account; `Calendar` (id 34) owned by `eiderwhi@lshtm.ac.uk` |
+| A13 | ✓ A meeting with five rows and one block: `Labels read in Outlook: 1 of 5`, four `Stale copy…` lines, no problem card, one review row; a second scan the same, the label cache unchanged. Room booking: one entry in the wizard. Not run on a day the real meeting is cancelled; a stale series on another day was left out as absent |
 | B1 | ✓ Rows: People, All Day, Date `Thu 8 Oct, Tomorrow`, `Time (GMT+1)`, **Time zone** (new), Location, **Online Meeting (Zoom) switch** (new, off), Description, Attachments, Repeat, Alert `15 minutes before`, Show as, Private; account `richard.white@lshtm.ac.uk` |
 | B2 | ✓ `ACTION_SET_TEXT` sets the title |
 | B3–B6 | ✓ Drag picker, mode button → wheels; scrolling steps a wheel; hours wrap. Fixed: wheel values read stale from the accessibility cache (the service now receives every event type and reads a fresh snapshot), and the date wheel says *Yesterday/Today/Tomorrow* near today |
@@ -111,6 +112,7 @@ Git Bash rewrites `/sdcard/...` paths: set `MSYS_NO_PATHCONV=1` for `adb shell` 
 | A10 | Auto-rotate **on**; start a scan, then turn the phone sideways while Outlook is being driven | The screen stays portrait until the strip goes, then turns as usual. Start a scan with the phone sideways: log `Turning the screen upright for the run`, the screen turns first, the strip fits the status bar. If the screen still turns mid-run, the fallback is QUESTIONS.md Q17 |
 | A11 | With calendar access off (A7), set an alarm for a labelled event; turn access back on and scan that day again | The event shows *✓ Alarm already set*: no second alarm (titles are cleaned the same way on both paths) |
 | A12 | `adb shell content query --uri content://com.android.calendar/calendars --projection _id:name:account_name:ownerAccount:calendar_access_level` | One Outlook calendar called `Calendar` owned by an LSHTM address (`eiderwhi@lshtm.ac.uk`): the one the app reads. If Outlook has another account, none of its events appear in the review or the wizard (QUESTIONS.md Q3) |
+| A13 | A day where the provider has more rows for an event than Outlook has blocks (`content query` on `instances/when/<begin>/<end>`: same title and start, different `event_id`; the Day view shows one block). Scan it | Log: `Stale copy in the phone's calendar, left out: …` once per surplus row; the event's labels read; no problem card; the event offered **once**. Scan again: the same, with Outlook opened again, as these labels aren't remembered. On a day the real meeting is cancelled the stale rows have no block: `Not in Outlook, left out` |
 
 ## B. Probes on Outlook's form (nothing saved)
 

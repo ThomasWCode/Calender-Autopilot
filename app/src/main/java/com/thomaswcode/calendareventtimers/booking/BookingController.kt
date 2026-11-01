@@ -14,6 +14,7 @@ import com.thomaswcode.calendareventtimers.outlook.BookingJob
 import com.thomaswcode.calendareventtimers.outlook.BookingNavigator
 import com.thomaswcode.calendareventtimers.outlook.BookingOutcome
 import com.thomaswcode.calendareventtimers.outlook.LabelRead
+import com.thomaswcode.calendareventtimers.outlook.LabelSlots
 import com.thomaswcode.calendareventtimers.outlook.OutlookBusy
 import com.thomaswcode.calendareventtimers.outlook.OutlookNavigator
 import com.thomaswcode.calendareventtimers.outlook.OutlookReaderService
@@ -175,11 +176,16 @@ object BookingController {
         val absent = reads.filterValues { it is LabelRead.Absent }.keys
         absent.forEach { ScanLog.i("Not in Outlook, left out: ${it.title} ${it.date} ${it.start}") }
         if (labelPlan.absent.isNotEmpty()) ScanLog.i("${labelPlan.absent.size} event(s) found missing from Outlook lately, left out")
+        // Rows repeating an event Outlook shows once: left out, this run only, or one meeting
+        // would be offered, and booked, once for each.
+        val stale = reads.filterValues { it is LabelRead.Stale }.keys
+        stale.forEach { ScanLog.i("Stale copy in the phone's calendar, left out: ${it.title} ${it.date} ${it.start}") }
+        val staleRows = LabelSlots.staleRows(reads)
         val gone = labelPlan.absent + absent.map { it.occurrenceKey }
         // The cache proved unreliable: what it gave this run is left out too.
-        val distrusted = labels.remember(read, Instant.now(), absent) && labelPlan.known.isNotEmpty()
+        val distrusted = labels.remember(LabelSlots.toRemember(reads), Instant.now(), absent) && labelPlan.known.isNotEmpty()
         val reused = if (distrusted) emptyMap() else labelPlan.known
-        reads.values.forEach { if (it is LabelRead.Problem) problems += it.message }
+        problems += reads.values.mapNotNull { (it as? LabelRead.Problem)?.message }.distinct()
         if (distrusted) problems += LabelPass.distrusted(candidates.count { it.labelKey in labelPlan.known })
 
         val bookings = BookingStore.get(app)
@@ -187,7 +193,7 @@ object BookingController {
         val keys = candidates.map { it.occurrenceKey }
         val out = BookingPlanner.plan(
             BookingPlanner.Input(
-                events = events.filterNot { it.occurrenceKey in gone },
+                events = events.filterNot { it.occurrenceKey in gone || it.rowKey in staleRows },
                 labels = reused + read.mapKeys { it.key.labelKey },
                 attendees = attendees,
                 known = bookings.known(keys),
