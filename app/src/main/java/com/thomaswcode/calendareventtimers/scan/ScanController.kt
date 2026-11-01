@@ -183,12 +183,13 @@ object ScanController {
             // Rows repeating an event Outlook shows once: left out, this run only.
             val stale = reads.filterValues { it is LabelRead.Stale }.keys
             stale.forEach { ScanLog.i("Stale copy in the phone's calendar, left out: ${it.title} (${TriggerTime.formatHhMm(it.start)})") }
-            val gone = plan.absent + absent.map { it.occurrenceKey } + stale.map { it.occurrenceKey }
+            val staleRows = LabelSlots.staleRows(reads)
+            val gone = plan.absent + absent.map { it.occurrenceKey }
             // The cache proved unreliable: what it gave this run is left out too.
             val distrusted = labels.remember(LabelSlots.toRemember(reads), Instant.now(), absent) && plan.known.isNotEmpty()
             val reused = if (distrusted) emptyMap() else plan.known
             val known = reused + read.mapKeys { it.key.labelKey }
-            val events = upcoming.filterNot { it.occurrenceKey in gone }.mapNotNull { e ->
+            val events = upcoming.filterNot { it.occurrenceKey in gone || it.rowKey in staleRows }.mapNotNull { e ->
                 // Cleaned as Outlook's screens are (bidi marks, non-breaking spaces), so an alarm set by
                 // a whole-day scan is recognised as this event's, not set twice.
                 known[e.labelKey]?.let { cats ->

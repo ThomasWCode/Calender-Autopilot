@@ -131,8 +131,20 @@ class StaleRowsTest {
         assertEquals(5, planned(rows).size)
 
         val out = LabelSlots.assign(rows.map(::target), rows, read("Moveable").copy(newestRows = 1))
-        val gone = out.filterValues { it is LabelRead.Stale }.keys.map { it.occurrenceKey }.toSet()
-        assertEquals(listOf(real.eventId), planned(rows.filterNot { it.occurrenceKey in gone }).map { it.event.eventId })
+        val stale = LabelSlots.staleRows(out)
+        assertEquals(listOf(real.eventId), planned(rows.filterNot { it.rowKey in stale }).map { it.event.eventId })
+    }
+
+    @Test
+    fun copiesSharingASyncIdAreToldApartByTheirRows() {
+        // Nothing makes a sync id unique, so they can share an occurrence key too.
+        val old = calEvent(101, "Team call", day, "17:00", "17:30", syncId = "shared", recurring = true)
+        val new = calEvent(205, "Team call", day, "17:00", "17:30", syncId = "shared", recurring = true)
+        assertEquals(old.occurrenceKey, new.occurrenceKey)
+
+        val out = LabelSlots.assign(listOf(target(old)), listOf(old, new), read("Moveable").copy(newestRows = 1))
+        assertEquals(setOf(old.rowKey), LabelSlots.staleRows(out))
+        assertEquals(setOf(target(new)), out.filterValues { it is LabelRead.Read }.keys)
     }
 
     private fun block(title: String) = start to "Monday 12 October, 17:00 to 17:30, $title"

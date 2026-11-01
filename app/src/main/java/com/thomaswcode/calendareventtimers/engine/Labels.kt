@@ -48,6 +48,7 @@ data class LabelTarget(
     val start: LocalTime,
     val title: String,
     val occurrenceKey: String = labelKey,
+    val rowKey: String = occurrenceKey,
 )
 
 object LabelTargets {
@@ -68,7 +69,7 @@ object LabelTargets {
         return chosen.sortedWith(compareBy({ it.begin }, { it.title })).map(::target)
     }
 
-    fun target(e: CalEvent): LabelTarget = LabelTarget(e.labelKey, e.changeKey, e.date, e.start, e.title, e.occurrenceKey)
+    fun target(e: CalEvent): LabelTarget = LabelTarget(e.labelKey, e.changeKey, e.date, e.start, e.title, e.occurrenceKey, e.rowKey)
 
     /**
      * After a round of reads: a series whose chosen occurrence turned out [absent] still needs its

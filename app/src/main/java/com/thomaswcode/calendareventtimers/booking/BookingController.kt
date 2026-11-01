@@ -180,7 +180,8 @@ object BookingController {
         // would be offered, and booked, once for each.
         val stale = reads.filterValues { it is LabelRead.Stale }.keys
         stale.forEach { ScanLog.i("Stale copy in the phone's calendar, left out: ${it.title} ${it.date} ${it.start}") }
-        val gone = labelPlan.absent + absent.map { it.occurrenceKey } + stale.map { it.occurrenceKey }
+        val staleRows = LabelSlots.staleRows(reads)
+        val gone = labelPlan.absent + absent.map { it.occurrenceKey }
         // The cache proved unreliable: what it gave this run is left out too.
         val distrusted = labels.remember(LabelSlots.toRemember(reads), Instant.now(), absent) && labelPlan.known.isNotEmpty()
         val reused = if (distrusted) emptyMap() else labelPlan.known
@@ -192,7 +193,7 @@ object BookingController {
         val keys = candidates.map { it.occurrenceKey }
         val out = BookingPlanner.plan(
             BookingPlanner.Input(
-                events = events.filterNot { it.occurrenceKey in gone },
+                events = events.filterNot { it.occurrenceKey in gone || it.rowKey in staleRows },
                 labels = reused + read.mapKeys { it.key.labelKey },
                 attendees = attendees,
                 known = bookings.known(keys),

@@ -129,7 +129,7 @@ class OutlookNavigator(
                 val rows = LabelSlots.rows(expected[date], date, slot.first, slot.second)
                 val twins = maxOf(rows?.size ?: 0, group.size)
                 // Only rows known to include every target can say which are stale: never lose a target.
-                val rowsKnown = rows != null && rows.map { it.occurrenceKey }.containsAll(group.map { it.occurrenceKey })
+                val rowsKnown = rows != null && rows.map { it.rowKey }.containsAll(group.map { it.rowKey })
                 val read = readSlot(group.first(), twins, othersShown = shown > 0, rowsKnown = rowsKnown)
                 out += LabelSlots.assign(group, rows.orEmpty(), read)
             }
@@ -680,10 +680,14 @@ internal object LabelSlots {
      */
     fun assign(group: List<LabelTarget>, rows: List<CalEvent>, read: LabelRead): Map<LabelTarget, LabelRead> {
         val newest = (read as? LabelRead.Read)?.newestRows ?: return group.associateWith { read }
-        val kept = rows.sortedByDescending { it.eventId }.take(newest).map { it.occurrenceKey }.toSet()
+        val kept = rows.sortedByDescending { it.eventId }.take(newest).map { it.rowKey }.toSet()
         val stale = LabelRead.Stale("${read.title}: ${rows.size} rows in the phone's calendar for $newest in Outlook")
-        return (group + rows.map(LabelTargets::target)).associateWith { if (it.occurrenceKey in kept) read else stale }
+        return (group + rows.map(LabelTargets::target)).associateWith { if (it.rowKey in kept) read else stale }
     }
+
+    /** The rows ([CalEvent.rowKey]) to leave out of this run: by row, as a kept copy may share their occurrence key. */
+    fun staleRows(reads: Map<LabelTarget, LabelRead>): Set<String> =
+        reads.filterValues { it is LabelRead.Stale }.keys.map { it.rowKey }.toSet()
 
     /** The labels that may be kept for later runs ([LabelRead.Read.remember]). */
     fun toRemember(reads: Map<LabelTarget, LabelRead>): Map<LabelTarget, List<String>> =

@@ -50,6 +50,9 @@ data class CalEvent(
     /** This occurrence; a moved occurrence gets a new key and counts as a new event. */
     val occurrenceKey: String get() = "$labelKey@${begin.toEpochMilli()}"
 
+    /** This occurrence of this provider row: nothing makes a sync id unique, so rows can share [occurrenceKey]. */
+    val rowKey: String get() = "$eventId@${begin.toEpochMilli()}"
+
     /** The same meeting week after week: the series for a recurring event, else its title. */
     val seriesKey: String
         get() = originalSyncId ?: if (recurring && syncId != null) syncId else "title:" + normaliseTitle(title)
