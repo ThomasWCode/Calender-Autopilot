@@ -10,6 +10,7 @@ import com.thomaswcode.calendareventtimers.domain.ScannedEvent
 import com.thomaswcode.calendareventtimers.domain.TriggerTime
 import com.thomaswcode.calendareventtimers.domain.cleanUiText
 import com.thomaswcode.calendareventtimers.engine.LabelTarget
+import com.thomaswcode.calendareventtimers.engine.LabelTargets
 import com.thomaswcode.calendareventtimers.outlook.CalendarReader.EventBlock
 import com.thomaswcode.calendareventtimers.outlook.CalendarReader.StripDay
 import com.thomaswcode.calendareventtimers.util.ScanLog
@@ -25,7 +26,14 @@ class ScanFailure(message: String) : Exception(message)
 
 /** What reading one event's labels in Outlook gave. */
 sealed interface LabelRead {
-    data class Read(val title: String, val categories: List<String>) : LabelRead
+    /**
+     * [newestRows]: set when the phone's calendar has more rows for this slot than Outlook has
+     * blocks: only that many rows, the newest, are real ([LabelSlots.assign]). Such a read isn't
+     * remembered: labels are kept per series, and a wrong row's would outlive this run.
+     */
+    data class Read(val title: String, val categories: List<String>, val newestRows: Int? = null) : LabelRead {
+        val remember: Boolean get() = newestRows == null
+    }
 
     data class Problem(val message: String) : LabelRead
 
@@ -36,6 +44,14 @@ sealed interface LabelRead {
      * while, so it isn't looked for again on every run.
      */
     data class Absent(val message: String) : LabelRead
+
+    /**
+     * A row of the phone's calendar repeating an event Outlook shows once: Outlook's sync can leave
+     * earlier copies behind (seen on 2026-11-01: a meeting edited several times kept a row per edit,
+     * live though Outlook had dropped them). Left out of this run only: nothing is remembered, as
+     * which row is real is a judgement, and the row may be the event once Outlook tidies up.
+     */
+    data class Stale(val message: String) : LabelRead
 }
 
 /**
@@ -109,10 +125,13 @@ class OutlookNavigator(
             val slots = dayTargets.groupBy { it.start to CalEvent.normaliseTitle(it.title) }
             for (slot in slots.keys.sortedWith(compareBy({ it.first }, { it.second }))) {
                 val group = slots.getValue(slot)
-                onProgress("Reading labels ${out.size + 1} of $total: ${group.first().title}")
-                val twins = maxOf(LabelSlots.twins(expected[date], date, slot.first, slot.second) ?: 0, group.size)
-                val read = readSlot(group.first(), twins, othersShown = shown > 0)
-                group.forEach { out[it] = read }
+                onProgress("Reading labels ${minOf(out.size + 1, total)} of $total: ${group.first().title}")
+                val rows = LabelSlots.rows(expected[date], date, slot.first, slot.second)
+                val twins = maxOf(rows?.size ?: 0, group.size)
+                // Only rows known to include every target can say which are stale: never lose a target.
+                val rowsKnown = rows != null && rows.map { it.occurrenceKey }.containsAll(group.map { it.occurrenceKey })
+                val read = readSlot(group.first(), twins, othersShown = shown > 0, rowsKnown = rowsKnown)
+                out += LabelSlots.assign(group, rows.orEmpty(), read)
             }
         }
     }
@@ -354,11 +373,13 @@ class OutlookNavigator(
      * Opens every block of [t]'s slot that mentions its title (normally one) and keeps those that
      * open as exactly this event. When the calendar has [twins] such events, nothing on the Day
      * view says which block is which, so [LabelSlots.decide] only gives labels all of them share.
+     * [rowsKnown]: [twins] counts the calendar's rows, so fewer blocks can mean stale rows.
      */
-    private suspend fun readSlot(t: LabelTarget, twins: Int, othersShown: Boolean): LabelRead {
+    private suspend fun readSlot(t: LabelTarget, twins: Int, othersShown: Boolean, rowsKnown: Boolean): LabelRead {
         val time = TriggerTime.formatHhMm(t.start)
         ensureOnDay(t.date)
-        val count = min(findBlocks(t.date, t.start, t.title).size, MAX_SLOT_BLOCKS)
+        val blocks = findBlocks(t.date, t.start, t.title).size
+        val count = min(blocks, MAX_SLOT_BLOCKS)
         if (count == 0) {
             return if (othersShown) {
                 LabelRead.Absent("${t.title} ($time): in the phone's calendar but not in Outlook")
@@ -369,16 +390,21 @@ class OutlookNavigator(
         val exact = ArrayList<LabelRead.Read>()
         val unreadable = ArrayList<String>()
         var other: String? = null
+        var allRead = rowsKnown && blocks <= MAX_SLOT_BLOCKS
         for (i in 0 until count) {
             if (i > 0) ensureOnDay(t.date)
-            val block = findBlocks(t.date, t.start, t.title).getOrNull(i) ?: break
+            val block = findBlocks(t.date, t.start, t.title).getOrNull(i)
+            if (block == null) {
+                allRead = false
+                break
+            }
             when (val r = readBlock(t, block)) {
                 is BlockRead.Exact -> exact += r.read
                 is BlockRead.Other -> if (other == null) other = r.message
                 is BlockRead.Unreadable -> unreadable += r.message
             }
         }
-        return LabelSlots.decide(t.title, time, twins, exact, unreadable, other)
+        return LabelSlots.decide(t.title, time, twins, exact, unreadable, other, allRead)
     }
 
     private sealed interface BlockRead {
@@ -439,8 +465,7 @@ class OutlookNavigator(
         val blocks = CalendarReader.eventBlocks(driver.snapshot())
             .mapNotNull { b -> EventParser.startTimeIfStartsOn(b.desc, date)?.let { it to b.desc } }
         val timed = expected.filter { !it.allDay && it.date == date }
-        val notInOutlook = timed.filter { e -> blocks.none { (s, d) -> s == e.start && EventParser.descMentions(d, e.title) } }
-        val notInProvider = blocks.filter { (s, d) -> timed.none { e -> s == e.start && EventParser.descMentions(d, e.title) } }
+        val (notInOutlook, notInProvider) = LabelSlots.unpaired(timed, blocks)
         if (notInOutlook.isEmpty() && notInProvider.isEmpty()) {
             ScanLog.i("${EventParser.dayLabel(date)}: the Day view and the phone's calendar agree (${timed.size} events)")
         } else {
@@ -601,26 +626,40 @@ class OutlookNavigator(
  * blocks give no way to tell which is which. So their labels are read from every block that may
  * be one of them, and count only if those all agree; otherwise none is remembered rather than
  * one event getting another's labels.
+ *
+ * Rows aren't always events, though ([LabelRead.Stale]). When every block opened as this event and
+ * there are still fewer blocks than rows, the extra rows have no block: the labels go to as many
+ * rows as there are blocks, and the others are left out of the run, so that one meeting isn't
+ * offered as several (room booking has nothing else to stop that).
  */
 internal object LabelSlots {
-    /** How many events the Day view may show for this slot: timed, live and not declined; null: unknown. */
-    fun twins(expected: List<CalEvent>?, date: LocalDate, start: LocalTime, normalisedTitle: String): Int? =
-        expected?.count {
+    /** The events the Day view may show for this slot: timed, live and not declined; null: unknown. */
+    fun rows(expected: List<CalEvent>?, date: LocalDate, start: LocalTime, normalisedTitle: String): List<CalEvent>? =
+        expected?.filter {
             it.date == date && !it.allDay && it.start == start && !it.cancelled &&
                 it.selfStatus != Attendee.STATUS_DECLINED && CalEvent.normaliseTitle(it.title) == normalisedTitle
         }
 
+    /** How many events the Day view may show for this slot; null: unknown. */
+    fun twins(expected: List<CalEvent>?, date: LocalDate, start: LocalTime, normalisedTitle: String): Int? =
+        rows(expected, date, start, normalisedTitle)?.size
+
     /**
      * The slot's labels from the blocks that opened as exactly [title] ([exact]), with the messages
      * of blocks that couldn't be read ([unreadable]) and of one that was another event ([other]).
+     * [allRead]: every block the Day view has for the slot was opened, and [twins] counts rows.
      */
-    fun decide(title: String, time: String, twins: Int, exact: List<LabelRead.Read>, unreadable: List<String>, other: String?): LabelRead {
+    fun decide(
+        title: String, time: String, twins: Int, exact: List<LabelRead.Read>, unreadable: List<String>, other: String?, allRead: Boolean = false,
+    ): LabelRead {
         if (exact.isEmpty()) return LabelRead.Problem(unreadable.firstOrNull() ?: other ?: "$title ($time): not found in Outlook's Day view")
         val sets = exact.map { r -> r.categories.map { it.trim().lowercase() }.toSet() }.distinct()
         return when {
             sets.size > 1 -> LabelRead.Problem(
                 "$title ($time): ${exact.size} events have this title and time but different labels, and Outlook doesn't show which is which",
             )
+            // Nothing unaccounted for on the Day view: the rows beyond its blocks aren't in Outlook.
+            exact.size < twins && allRead && unreadable.isEmpty() && other == null -> exact.first().copy(newestRows = exact.size)
             twins > 1 && exact.size < twins -> LabelRead.Problem(
                 "$title ($time): $twins events have this title and time, and only ${exact.size} could be read in Outlook",
             )
@@ -631,5 +670,37 @@ internal object LabelSlots {
             )
             else -> exact.first()
         }
+    }
+
+    /**
+     * What [read] means for each of the slot's targets ([group]). A read with [LabelRead.Read.newestRows]
+     * covers all the slot's [rows], cached ones too: it goes to the newest, as Outlook's sync adds a
+     * row for each change, so a row written after the real one could only come from an item that
+     * was still alive then. The others are [LabelRead.Stale].
+     */
+    fun assign(group: List<LabelTarget>, rows: List<CalEvent>, read: LabelRead): Map<LabelTarget, LabelRead> {
+        val newest = (read as? LabelRead.Read)?.newestRows ?: return group.associateWith { read }
+        val kept = rows.sortedByDescending { it.eventId }.take(newest).map { it.occurrenceKey }.toSet()
+        val stale = LabelRead.Stale("${read.title}: ${rows.size} rows in the phone's calendar for $newest in Outlook")
+        return (group + rows.map(LabelTargets::target)).associateWith { if (it.occurrenceKey in kept) read else stale }
+    }
+
+    /** The labels that may be kept for later runs ([LabelRead.Read.remember]). */
+    fun toRemember(reads: Map<LabelTarget, LabelRead>): Map<LabelTarget, List<String>> =
+        reads.mapNotNull { (t, r) -> (r as? LabelRead.Read)?.takeIf { it.remember }?.let { t to it.categories } }.toMap()
+
+    /**
+     * The phone's [timed] events without a block and the [blocks] (start, description) without an
+     * event, each block standing for one event only. Longest titles first: a block's description
+     * mentions more than its own title (`Room Booking - Team call` mentions `Team call`).
+     */
+    fun unpaired(timed: List<CalEvent>, blocks: List<Pair<LocalTime, String>>): Pair<List<CalEvent>, List<Pair<LocalTime, String>>> {
+        val free = blocks.toMutableList()
+        val paired = timed.sortedByDescending { it.title.length }.filter { e ->
+            val i = free.indexOfFirst { (s, d) -> s == e.start && EventParser.descMentions(d, e.title) }
+            if (i >= 0) free.removeAt(i)
+            i >= 0
+        }.toSet()
+        return timed.filter { it !in paired } to free
     }
 }

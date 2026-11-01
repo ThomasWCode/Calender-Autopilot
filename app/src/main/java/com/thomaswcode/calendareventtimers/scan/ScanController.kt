@@ -18,6 +18,7 @@ import com.thomaswcode.calendareventtimers.engine.LabelTarget
 import com.thomaswcode.calendareventtimers.engine.LabelTargets
 import com.thomaswcode.calendareventtimers.outlook.AppScope
 import com.thomaswcode.calendareventtimers.outlook.LabelRead
+import com.thomaswcode.calendareventtimers.outlook.LabelSlots
 import com.thomaswcode.calendareventtimers.outlook.OutlookBusy
 import com.thomaswcode.calendareventtimers.outlook.OutlookNavigator
 import com.thomaswcode.calendareventtimers.outlook.OutlookReaderService
@@ -179,9 +180,12 @@ object ScanController {
             val absent = reads.filterValues { it is LabelRead.Absent }.keys
             absent.forEach { ScanLog.i("Not in Outlook, left out: ${it.title} (${TriggerTime.formatHhMm(it.start)})") }
             if (plan.absent.isNotEmpty()) ScanLog.i("${plan.absent.size} event(s) found missing from Outlook lately, left out")
-            val gone = plan.absent + absent.map { it.occurrenceKey }
+            // Rows repeating an event Outlook shows once: left out, this run only.
+            val stale = reads.filterValues { it is LabelRead.Stale }.keys
+            stale.forEach { ScanLog.i("Stale copy in the phone's calendar, left out: ${it.title} (${TriggerTime.formatHhMm(it.start)})") }
+            val gone = plan.absent + absent.map { it.occurrenceKey } + stale.map { it.occurrenceKey }
             // The cache proved unreliable: what it gave this run is left out too.
-            val distrusted = labels.remember(read, Instant.now(), absent) && plan.known.isNotEmpty()
+            val distrusted = labels.remember(LabelSlots.toRemember(reads), Instant.now(), absent) && plan.known.isNotEmpty()
             val reused = if (distrusted) emptyMap() else plan.known
             val known = reused + read.mapKeys { it.key.labelKey }
             val events = upcoming.filterNot { it.occurrenceKey in gone }.mapNotNull { e ->
@@ -191,7 +195,7 @@ object ScanController {
                     ScannedEvent(cleanUiText(e.title).orEmpty(), e.date, e.start, cleanUiText(e.location)?.ifEmpty { null }, cats)
                 }
             }
-            val problems = reads.values.mapNotNull { (it as? LabelRead.Problem)?.message } +
+            val problems = reads.values.mapNotNull { (it as? LabelRead.Problem)?.message }.distinct() +
                 listOfNotNull(LabelPass.distrusted(upcoming.count { it.labelKey in plan.known }).takeIf { distrusted })
             val result = buildResult(
                 context, target, isToday, events, problems, started.size, zone, failure,
