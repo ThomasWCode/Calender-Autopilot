@@ -8,33 +8,34 @@ import org.junit.Test
 class RingTimeoutTest {
     @Test
     fun defaultIsOneOfTheOptions() {
-        assertTrue(RingTimeout.DEFAULT_MIN in RingTimeout.OPTIONS_MIN)
-        assertEquals(10, RingTimeout.DEFAULT_MIN)
+        assertTrue(RingTimeout.DEFAULT_SEC in RingTimeout.OPTIONS_SEC)
+        assertEquals(600, RingTimeout.DEFAULT_SEC)
     }
 
     @Test
-    fun optionsAreAscendingAndShortEnoughToMiss() {
-        assertEquals(RingTimeout.OPTIONS_MIN.sorted(), RingTimeout.OPTIONS_MIN)
-        assertEquals(RingTimeout.OPTIONS_MIN.distinct(), RingTimeout.OPTIONS_MIN)
-        assertTrue(RingTimeout.OPTIONS_MIN.all { it > 0 })
+    fun optionsAreTheAgreedOnes() {
+        assertEquals(listOf(20, 60, 120, 300, 600), RingTimeout.OPTIONS_SEC)
     }
 
     @Test
     fun chosenValueIsKept() {
-        for (m in RingTimeout.OPTIONS_MIN) assertEquals(m, RingTimeout.normalise(m))
+        for (s in RingTimeout.OPTIONS_SEC) assertEquals(s, RingTimeout.normalise(s))
     }
 
     @Test
     fun anythingElseFallsBackToTheDefault() {
-        for (m in listOf(Int.MIN_VALUE, -1, 0, 3, 11, 60, 24 * 60, Int.MAX_VALUE)) {
-            assertEquals("$m", RingTimeout.DEFAULT_MIN, RingTimeout.normalise(m))
+        // 15 and 30 minutes were offered briefly; 1, 2, 5 and 10 are old-style minute values.
+        for (s in listOf(Int.MIN_VALUE, -1, 0, 1, 10, 30, 900, 1800, 86_400, Int.MAX_VALUE)) {
+            assertEquals("$s", RingTimeout.DEFAULT_SEC, RingTimeout.normalise(s))
         }
     }
 
     @Test
     fun labels() {
-        assertEquals("1 minute", RingTimeout.label(1))
-        assertEquals("2 minutes", RingTimeout.label(2))
-        assertEquals("10 minutes", RingTimeout.label(10))
+        assertEquals("20 seconds", RingTimeout.label(20))
+        assertEquals("1 minute", RingTimeout.label(60))
+        assertEquals("2 minutes", RingTimeout.label(120))
+        assertEquals("5 minutes", RingTimeout.label(300))
+        assertEquals("10 minutes", RingTimeout.label(600))
     }
 }

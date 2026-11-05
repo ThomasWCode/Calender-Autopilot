@@ -233,7 +233,7 @@ Decision: the app owns its alarms.
     `Title (Label) @ Location`, the event start time, and **Dismiss** / **Snooze**.
     When the phone is in use, it shows as a heads-up notification with the same buttons.
   - Defaults: **snooze 5 min**; **auto-silence after 10 min** (then a missed-alarm notification).
-    Auto-silence is a setting (Settings → Alarms: 1, 2, 5, 10, 15 or 30 min), kept in
+    Auto-silence is a setting (Settings → Alarms: 20 s, 1, 2, 5 or 10 min), kept in
     device-protected storage (`AlarmPrefs`) because the ring service reads it before the first unlock.
 - **Persistence:** every alarm is stored in `AlarmStore` (Room or DataStore).
   `AlarmManager` alarms are wiped by reboot and force-stop, so `RescheduleReceiver`

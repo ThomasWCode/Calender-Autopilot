@@ -15,29 +15,29 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 object AlarmPrefs {
     private const val FILE = "alarm_settings"
-    private const val KEY_RING_TIMEOUT_MIN = "ring_timeout_min"
+    private const val KEY_RING_TIMEOUT_SEC = "ring_timeout_sec"
 
-    private val _ringTimeoutMin = MutableStateFlow(RingTimeout.DEFAULT_MIN)
+    private val _ringTimeoutSec = MutableStateFlow(RingTimeout.DEFAULT_SEC)
 
-    /** Minutes an unanswered alarm rings before it falls silent (one of [RingTimeout.OPTIONS_MIN]). */
-    val ringTimeoutMin: StateFlow<Int> = _ringTimeoutMin.asStateFlow()
+    /** Seconds an unanswered alarm rings before it falls silent (one of [RingTimeout.OPTIONS_SEC]). */
+    val ringTimeoutSec: StateFlow<Int> = _ringTimeoutSec.asStateFlow()
 
     /** Refreshes the values the settings screen shows. */
     fun load(context: Context) {
-        _ringTimeoutMin.value = readRingTimeoutMin(context)
+        _ringTimeoutSec.value = readRingTimeoutSec(context)
     }
 
     /** Read from the file each time, so a ringing alarm always gets the latest choice. */
-    fun ringTimeout(context: Context): Duration = Duration.ofMinutes(readRingTimeoutMin(context).toLong())
+    fun ringTimeout(context: Context): Duration = Duration.ofSeconds(readRingTimeoutSec(context).toLong())
 
-    fun setRingTimeoutMin(context: Context, minutes: Int) {
-        val value = RingTimeout.normalise(minutes)
-        prefs(context).edit { putInt(KEY_RING_TIMEOUT_MIN, value) }
-        _ringTimeoutMin.value = value
+    fun setRingTimeoutSec(context: Context, seconds: Int) {
+        val value = RingTimeout.normalise(seconds)
+        prefs(context).edit { putInt(KEY_RING_TIMEOUT_SEC, value) }
+        _ringTimeoutSec.value = value
     }
 
-    private fun readRingTimeoutMin(context: Context): Int =
-        RingTimeout.normalise(prefs(context).getInt(KEY_RING_TIMEOUT_MIN, RingTimeout.DEFAULT_MIN))
+    private fun readRingTimeoutSec(context: Context): Int =
+        RingTimeout.normalise(prefs(context).getInt(KEY_RING_TIMEOUT_SEC, RingTimeout.DEFAULT_SEC))
 
     private fun prefs(context: Context) =
         context.applicationContext.createDeviceProtectedStorageContext().getSharedPreferences(FILE, Context.MODE_PRIVATE)

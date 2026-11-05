@@ -75,7 +75,7 @@ fun SettingsScreen(snackbar: SnackbarHostState, onBack: () -> Unit) {
     BackHandler(onBack = onBack)
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val ringTimeoutMin by AlarmPrefs.ringTimeoutMin.collectAsStateWithLifecycle()
+    val ringTimeoutSec by AlarmPrefs.ringTimeoutSec.collectAsStateWithLifecycle()
     val rooms by Prefs.rooms.collectAsStateWithLifecycle()
     val building by Prefs.building.collectAsStateWithLifecycle()
     val recentShortcut by Prefs.recentShortcut.collectAsStateWithLifecycle()
@@ -127,17 +127,17 @@ fun SettingsScreen(snackbar: SnackbarHostState, onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            items(RingTimeout.OPTIONS_MIN, key = { "ring-$it" }) { minutes ->
+            items(RingTimeout.OPTIONS_SEC, key = { "ring-$it" }) { seconds ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth().selectable(
-                        selected = minutes == ringTimeoutMin, role = Role.RadioButton,
-                        onClick = { AlarmPrefs.setRingTimeoutMin(context, minutes) },
+                        selected = seconds == ringTimeoutSec, role = Role.RadioButton,
+                        onClick = { AlarmPrefs.setRingTimeoutSec(context, seconds) },
                     ),
                 ) {
-                    RadioButton(selected = minutes == ringTimeoutMin, onClick = null, modifier = Modifier.padding(16.dp))
+                    RadioButton(selected = seconds == ringTimeoutSec, onClick = null, modifier = Modifier.padding(16.dp))
                     Text(
-                        if (minutes == RingTimeout.DEFAULT_MIN) "${RingTimeout.label(minutes)} (default)" else RingTimeout.label(minutes),
+                        if (seconds == RingTimeout.DEFAULT_SEC) "${RingTimeout.label(seconds)} (default)" else RingTimeout.label(seconds),
                         style = MaterialTheme.typography.bodyLarge,
                     )
                 }

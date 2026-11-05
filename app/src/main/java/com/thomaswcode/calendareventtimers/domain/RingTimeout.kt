@@ -6,13 +6,17 @@ package com.thomaswcode.calendareventtimers.domain
  * edited file) falls back to the default instead of ringing for an odd length.
  */
 object RingTimeout {
-    /** Minutes the user can choose from. */
-    val OPTIONS_MIN = listOf(1, 2, 5, 10, 15, 30)
+    /** Seconds the user can choose from. */
+    val OPTIONS_SEC = listOf(20, 60, 120, 300, 600)
 
-    const val DEFAULT_MIN = 10
+    const val DEFAULT_SEC = 600
 
-    fun normalise(minutes: Int): Int = if (minutes in OPTIONS_MIN) minutes else DEFAULT_MIN
+    fun normalise(seconds: Int): Int = if (seconds in OPTIONS_SEC) seconds else DEFAULT_SEC
 
-    /** "1 minute", "10 minutes". */
-    fun label(minutes: Int): String = if (minutes == 1) "1 minute" else "$minutes minutes"
+    /** "20 seconds", "1 minute", "10 minutes". */
+    fun label(seconds: Int): String {
+        if (seconds % 60 != 0) return "$seconds seconds"
+        val minutes = seconds / 60
+        return if (minutes == 1) "1 minute" else "$minutes minutes"
+    }
 }
