@@ -74,8 +74,8 @@ the app back to its own screen, nor when you come back from a settings screen th
   Today's events that have started are left out, and so are events the phone's calendar still has
   but Outlook doesn't (an occurrence left behind when a series moved; remembered for a week).
 - **Upcoming alarms** lists what is set; **✕** cancels one (with Undo). Ringing alarms offer
-  **Snooze 5 min** and **Dismiss**; unanswered ones stop after 10 minutes and leave a *Missed alarm*
-  notification.
+  **Snooze 5 min** and **Dismiss**; unanswered ones stop after 10 minutes (**⋮ → Settings → Alarms**:
+  1, 2, 5, 10, 15 or 30) and leave a *Missed alarm* notification.
 - **⋮ menu**: *Dry run*, *Test alarm in 1 / 2 minutes*, the setup checklist and the activity log.
 
 Alarm labels read `Title (Label) @ Location`, with meeting links shortened: `Kristian pdr

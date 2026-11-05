@@ -25,6 +25,7 @@ import com.thomaswcode.calendareventtimers.data.BookingStore
 import com.thomaswcode.calendareventtimers.outlook.OutlookSession
 import com.thomaswcode.calendareventtimers.scan.ScanController
 import com.thomaswcode.calendareventtimers.scan.ScanResult
+import com.thomaswcode.calendareventtimers.util.AlarmPrefs
 import com.thomaswcode.calendareventtimers.util.Prefs
 import com.thomaswcode.calendareventtimers.util.ScanLog
 import java.time.Instant
@@ -69,6 +70,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         Prefs.load(this)
+        AlarmPrefs.load(this)
         resyncAlarms()
         if (savedInstanceState == null) AppNav.request.value = pageFor(intent) ?: Page.LAUNCHER
         setContent { AppTheme { AppRoot() } }

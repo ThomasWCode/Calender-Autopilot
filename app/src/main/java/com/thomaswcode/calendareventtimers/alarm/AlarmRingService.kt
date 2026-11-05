@@ -28,6 +28,7 @@ import com.thomaswcode.calendareventtimers.data.AlarmState
 import com.thomaswcode.calendareventtimers.data.AlarmStore
 import com.thomaswcode.calendareventtimers.domain.AlarmText
 import com.thomaswcode.calendareventtimers.domain.TriggerTime
+import com.thomaswcode.calendareventtimers.util.AlarmPrefs
 import com.thomaswcode.calendareventtimers.util.ScanLog
 import java.time.Duration
 import java.time.Instant
@@ -58,7 +59,7 @@ import kotlinx.coroutines.withContext
  *
  * Alarms due together ring together. Snooze and Dismiss apply to the alarms the user was shown;
  * one that starts ringing in the same moment keeps ringing. Unanswered alarms fall silent after
- * [AlarmStore.RING_GRACE] and are reported as missed.
+ * the time chosen in Settings ([AlarmPrefs.ringTimeout]) and are reported as missed.
  */
 class AlarmRingService : Service() {
     data class Ringing(
@@ -139,10 +140,11 @@ class AlarmRingService : Service() {
         // First of all: a service started with startForegroundService() that doesn't call
         // startForeground() in time crashes the app.
         goForeground()
-        holdWakeLock()
+        val timeout = AlarmPrefs.ringTimeout(applicationContext)
+        holdWakeLock(timeout)
         startAlerting()
         handler.removeCallbacks(autoSilence)
-        handler.postDelayed(autoSilence, AlarmStore.RING_GRACE.toMillis())
+        handler.postDelayed(autoSilence, timeout.toMillis())
         // Cancelled from the Upcoming list in the very moment it fired? Then stop at once.
         val app = applicationContext
         scope.launch {
@@ -222,12 +224,12 @@ class AlarmRingService : Service() {
     }
 
     /** Held from the first ring until the service stops; each new ring renews its timeout. */
-    private fun holdWakeLock() {
+    private fun holdWakeLock(ringTimeout: Duration) {
         val lock = wakeLock ?: getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "CalendarEventTimers:ring")
             .apply { setReferenceCounted(false) }
             .also { wakeLock = it }
-        lock.acquire(AlarmStore.RING_GRACE.toMillis() + 60_000)
+        lock.acquire(ringTimeout.toMillis() + 60_000)
     }
 
     private fun releaseWakeLock() {
