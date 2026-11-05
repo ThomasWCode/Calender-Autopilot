@@ -156,7 +156,7 @@ class AlarmStore private constructor(context: Context) {
     companion object {
         const val SNOOZE_MINUTES = 5L
 
-        /** How long an alarm rings unanswered (auto-silence), and how late a re-registered one may still ring. */
+        /** How late a re-registered alarm may still ring. Fixed: the auto-silence time is a setting (AlarmPrefs). */
         val RING_GRACE: Duration = Duration.ofMinutes(10)
 
         /** Fired, missed and cancelled records are kept this long, then pruned. */

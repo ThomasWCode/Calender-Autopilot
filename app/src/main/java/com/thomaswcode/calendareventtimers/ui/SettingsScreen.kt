@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -29,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -50,25 +53,29 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.thomaswcode.calendareventtimers.booking.RoomList
 import com.thomaswcode.calendareventtimers.data.BookingStore
+import com.thomaswcode.calendareventtimers.domain.RingTimeout
 import com.thomaswcode.calendareventtimers.engine.LabelPass
+import com.thomaswcode.calendareventtimers.util.AlarmPrefs
 import com.thomaswcode.calendareventtimers.util.Prefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Settings (PLAN-ROOM-BOOKING.md §3.13): the rooms to try, in order, and what the app remembers. */
+/** Settings (PLAN-ROOM-BOOKING.md §3.13): how long alarms ring, the rooms to try, in order, and what the app remembers. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(snackbar: SnackbarHostState, onBack: () -> Unit) {
     BackHandler(onBack = onBack)
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val ringTimeoutSec by AlarmPrefs.ringTimeoutSec.collectAsStateWithLifecycle()
     val rooms by Prefs.rooms.collectAsStateWithLifecycle()
     val building by Prefs.building.collectAsStateWithLifecycle()
     val recentShortcut by Prefs.recentShortcut.collectAsStateWithLifecycle()
@@ -113,6 +120,30 @@ fun SettingsScreen(snackbar: SnackbarHostState, onBack: () -> Unit) {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            item { Text("Alarms", style = MaterialTheme.typography.titleMedium) }
+            item {
+                Text(
+                    "An alarm nobody answers falls silent after this long and is reported as a Missed alarm. Applies from the next alarm that rings.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            items(RingTimeout.OPTIONS_SEC, key = { "ring-$it" }) { seconds ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().selectable(
+                        selected = seconds == ringTimeoutSec, role = Role.RadioButton,
+                        onClick = { AlarmPrefs.setRingTimeoutSec(context, seconds) },
+                    ),
+                ) {
+                    RadioButton(selected = seconds == ringTimeoutSec, onClick = null, modifier = Modifier.padding(16.dp))
+                    Text(
+                        if (seconds == RingTimeout.DEFAULT_SEC) "${RingTimeout.label(seconds)} (default)" else RingTimeout.label(seconds),
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
+            }
+
+            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
             item { Text("Rooms, in order of preference", style = MaterialTheme.typography.titleMedium) }
             item {
                 Text(

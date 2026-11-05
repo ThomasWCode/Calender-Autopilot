@@ -233,6 +233,8 @@ Decision: the app owns its alarms.
     `Title (Label) @ Location`, the event start time, and **Dismiss** / **Snooze**.
     When the phone is in use, it shows as a heads-up notification with the same buttons.
   - Defaults: **snooze 5 min**; **auto-silence after 10 min** (then a missed-alarm notification).
+    Auto-silence is a setting (Settings → Alarms: 20 s, 1, 2, 5 or 10 min), kept in
+    device-protected storage (`AlarmPrefs`) because the ring service reads it before the first unlock.
 - **Persistence:** every alarm is stored in `AlarmStore` (Room or DataStore).
   `AlarmManager` alarms are wiped by reboot and force-stop, so `RescheduleReceiver`
   re-registers all future alarms on `BOOT_COMPLETED`, `LOCKED_BOOT_COMPLETED`,
@@ -420,7 +422,7 @@ Install: `adb install -r app-debug.apk`.
 | Re-runs | Events already given an alarm by the app are **skipped** |
 | Old alarms | Left alone. Fired alarms simply drop off the Upcoming list |
 | All-day events | **Ignored** |
-| Snooze / auto-silence | 5 min / 10 min (defaults, easy to change) |
+| Snooze / auto-silence | 5 min / 10 min (defaults; auto-silence is chosen in Settings, snooze is still fixed) |
 | Orientation | Always portrait. No landscape handling |
 
 ## Open questions
